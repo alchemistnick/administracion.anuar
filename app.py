@@ -7,7 +7,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycby8moCFp2NDWnSapd9TaA0OJPERRZf249QwFF9SJuw3QnKmAlc8RCHJdze-o3QTmCXwCA/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbyLfop6lvmgxhxHcZFrI8BtjXHZqhtD6smqPC8xedVeg_SB8lQJ8NbA-jSLPjFXvk26/exec"
 
 st.title("🛡️ Panel Interno del Secretariado - Control y Auditoría")
 
@@ -21,7 +21,6 @@ id_modelo_actual = CONFIG_MODELOS[modelo_seleccionado]
 
 st.sidebar.markdown("---")
 
-# Control de Acceso Global para el Panel de Administración
 admin_pass = st.sidebar.text_input("🔐 Contraseña Secretariado", type="password")
 
 if admin_pass == "Secretaria2026":
@@ -30,16 +29,17 @@ if admin_pass == "Secretaria2026":
     menu = st.sidebar.radio(
         "Módulos de Gestión",
         [
-            "Revisión de Pagos", 
-            "Auditoría de Nóminas y Fichas",
-            "Métricas del Evento"
+            "1. Revisión de Pagos", 
+            "2. Asignación de Matriz (Países)",
+            "3. Auditoría de Nóminas y Fichas",
+            "4. Búsqueda por DNI / Alumno"
         ]
     )
 
     # ---------------------------------------------------------
     # MÓDULO 1: REVISIÓN DE PAGOS
     # ---------------------------------------------------------
-    if menu == "Revisión de Pagos":
+    if menu == "1. Revisión de Pagos":
         st.subheader(f"Gestión y Auditoría de Pagos - {modelo_seleccionado}")
         
         if st.button("🔄 Actualizar Lista de Pagos"):
@@ -90,18 +90,149 @@ if admin_pass == "Secretaria2026":
             st.error(f"Error al conectar con la base de datos: {e}")
 
     # ---------------------------------------------------------
-    # MÓDULO 2: AUDITORÍA DE NÓMINAS Y FICHAS
+    # MÓDULO 2: ASIGNACIÓN DE MATRIZ DE PAÍSES
     # ---------------------------------------------------------
-    elif menu == "Auditoría de Nóminas y Fichas":
-        st.subheader(f"Control de Documentación y Fichas Médicas - {modelo_seleccionado}")
-        st.info("Próximamente: Vista consolidada de descargas de fichas por delegación y acreditaciones.")
+    elif menu == "2. Asignación de Matriz (Países)":
+        st.subheader(f"Asignación de Representaciones por Escuela - {modelo_seleccionado}")
+        
+        try:
+            res_del = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_modelo_actual}").json()
+            escuelas_aprobadas = res_del.get("data", [])
+        except Exception as e:
+            escuelas_aprobadas = []
+            st.error(f"Error al consultar escuelas: {e}")
+
+        if not escuelas_aprobadas:
+            st.warning("No hay escuelas con pagos aprobados listos para asignar matriz.")
+        else:
+            opciones_del = {f"{d['id_delegacion']} - {d['nombre_colegio']}": d for d in escuelas_aprobadas}
+            escuela_sel_label = st.selectbox("Seleccioná la Escuela Aprobada:", list(opciones_del.keys()))
+            escuela_actual = opciones_del[escuela_sel_label]
+            
+            st.markdown("---")
+            st.markdown(f"#### Asignar Representación a: **{escuela_actual['nombre_colegio']}** ({escuela_actual['id_delegacion']})")
+            
+            with st.form("form_asignar_pais"):
+                col_asig1, col_asig2 = st.columns(2)
+                with col_asig1:
+                    pais_nombre = st.text_input("Nombre del País / Delegación (Ej: Uganda, Francia, Suiza)")
+                with col_asig2:
+                    organo_nombre = st.text_input("Comité / Puesto (Ej: AG1, Consejo de Seguridad, Embajador)")
+                
+                submitted_asig = st.form_submit_button("➕ Guardar Asignación en Matriz")
+                
+                if submitted_asig:
+                    if not pais_nombre or not organo_nombre:
+                        st.error("Completá el nombre del país y el comité.")
+                    else:
+                        payload = {
+                            "action": "ASIGNAR_REPRESENTACION",
+                            "usuario": "ADMIN",
+                            "data": {
+                                "id_modelo": id_modelo_actual,
+                                "id_delegacion": escuela_actual['id_delegacion'],
+                                "pais": pais_nombre,
+                                "organo": organo_nombre
+                            }
+                        }
+                        with st.spinner("Guardando asignación..."):
+                            res = requests.post(API_URL, json=payload).json()
+                            if res.get("status") == "SUCCESS":
+                                st.success(f"¡Asignado **{organo_nombre} - {pais_nombre}** a {escuela_actual['nombre_colegio']}!")
+                            else:
+                                st.error(f"Error: {res.get('message')}")
+
+            # Mostrar asignaciones actuales de esta escuela
+            st.markdown("##### Asignaciones actuales de esta escuela:")
+            res_asig_curr = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion={escuela_actual['id_delegacion']}").json()
+            asig_list = res_asig_curr.get("data", [])
+            if asig_list:
+                for a in asig_list:
+                    st.write(f"• **{a.get('pais')}** ({a.get('organo')})")
+            else:
+                st.caption("Aún no tiene países asignados.")
 
     # ---------------------------------------------------------
-    # MÓDULO 3: MÉTRICAS DEL EVENTO
+    # MÓDULO 3: AUDITORÍA DE NÓMINAS Y FICHAS
     # ---------------------------------------------------------
-    elif menu == "Métricas del Evento":
-        st.subheader(f"Tablero de Control - {modelo_seleccionado}")
-        st.info("Próximamente: Estadísticas de recaudación, total de delegados cargados y estado de la matriz.")
+    elif menu == "3. Auditoría de Nóminas y Fichas":
+        st.subheader(f"Revision General de Nóminas Cargadas - {modelo_seleccionado}")
+        
+        try:
+            res_nom = requests.get(f"{API_URL}?action=GET_TODAS_NOMINAS&id_modelo={id_modelo_actual}").json()
+            todas_nominas = res_nom.get("data", [])
+        except Exception as e:
+            todas_nominas = []
+            st.error(f"Error al obtener nóminas: {e}")
+
+        if not todas_nominas:
+            st.info("Aún no hay participantes cargados en la base de datos para este modelo.")
+        else:
+            st.success(f"Total de participantes registrados: **{len(todas_nominas)}**")
+            
+            # Tabla de resumen rápido
+            tabla_resumen = []
+            for n in todas_nominas:
+                tabla_resumen.append({
+                    "ID Delegado": n.get("id_delegado"),
+                    "Escuela/ID": n.get("id_delegacion"),
+                    "Nombre Completo": n.get("nombre_completo"),
+                    "DNI": n.get("dni"),
+                    "Rol / Representación": n.get("rol_mnu"),
+                    "Ficha ID": "✅ Cargada" if n.get("drive_ficha_id") != "-" else "❌ Pendiente",
+                    "Autorización ID": "✅ Cargada" if n.get("drive_autorizacion_id") != "-" else "❌ Pendiente",
+                    "Alergias / Cuidados": n.get("alergias_medicas")
+                })
+            
+            st.dataframe(tabla_resumen, use_container_width=True)
+
+    # ---------------------------------------------------------
+    # MÓDULO 4: BÚSQUEDA POR DNI / ALUMNO
+    # ---------------------------------------------------------
+    elif menu == "4. Búsqueda por DNI / Alumno":
+        st.subheader(f"🔍 Buscador Global de Participantes - {modelo_seleccionado}")
+        
+        busqueda = st.text_input("Ingresá el DNI, Nombre o Código de Delegación (Ej: DEL-001):")
+        
+        if busqueda:
+            try:
+                res_nom = requests.get(f"{API_URL}?action=GET_TODAS_NOMINAS&id_modelo={id_modelo_actual}").json()
+                todas_nominas = res_nom.get("data", [])
+                
+                query = busqueda.strip().lower()
+                resultados = [
+                    n for n in todas_nominas 
+                    if query in str(n.get("dni", "")).lower() 
+                    or query in str(n.get("nombre_completo", "")).lower() 
+                    or query in str(n.get("id_delegacion", "")).lower()
+                ]
+                
+                if not resultados:
+                    st.warning(f"No se encontraron participantes que coincidan con '{busqueda}'.")
+                else:
+                    st.success(f"Se encontraron **{len(resultados)}** coincidencia(s):")
+                    
+                    for r in resultados:
+                        with st.expander(f"👤 {r.get('nombre_completo')} | DNI: {r.get('dni')} | Escuela: {r.get('id_delegacion')}"):
+                            st.write(f"**Rol / Comisión:** {r.get('rol_mnu')}")
+                            st.write(f"**Indicaciones Médicas / Alergias:** {r.get('alergias_medicas')}")
+                            
+                            col_f1, col_f2 = st.columns(2)
+                            with col_f1:
+                                ficha_id = r.get("drive_ficha_id")
+                                if ficha_id and ficha_id != "-":
+                                    st.markdown(f"[📄 Ver Ficha Médica en Drive](https://drive.google.com/file/d/{ficha_id}/view)", unsafe_allow_html=True)
+                                else:
+                                    st.caption("Ficha médica no adjuntada.")
+                                    
+                            with col_f2:
+                                aut_id = r.get("drive_autorizacion_id")
+                                if aut_id and aut_id != "-":
+                                    st.markdown(f"[📄 Ver Autorización en Drive](https://drive.google.com/file/d/{aut_id}/view)", unsafe_allow_html=True)
+                                else:
+                                    st.caption("Autorización de imagen no adjuntada.")
+            except Exception as e:
+                st.error(f"Error al realizar la búsqueda: {e}")
 
 elif admin_pass:
     st.error("🔒 Contraseña incorrecta. Acceso denegado al Panel del Secretariado.")
