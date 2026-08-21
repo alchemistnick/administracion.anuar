@@ -199,12 +199,11 @@ if admin_pass == "Secretaria2026":
                 st.error(f"Error: {e}")
 
 # ---------------------------------------------------------
-    # MÓDULO 2: ASIGNACIÓN MULTI-PAÍS EN TIEMPO REAL (CORREGIDO)
+    # MÓDULO 2: ASIGNACIÓN CON RECALCULO DE CUPOS REALES
     # ---------------------------------------------------------
     elif menu == "2. Asignación Automática de Sorteo":
         st.subheader(f"⚡ Asignación Directa y Validación de Cupos - {modelo_seleccionado}")
 
-        # Carga general de la matriz
         with st.spinner("Sincronizando matriz y asignaciones..."):
             escuelas_aprobadas, lista_paises, organos_matriz, modalidades_evento, _ = cargar_datos_sorteo(id_modelo_actual)
 
@@ -221,33 +220,14 @@ if admin_pass == "Secretaria2026":
                 escuela_actual = opciones_del[escuela_sel_label]
                 id_del_actual = str(escuela_actual.get('id_delegacion')).strip()
 
-            # CONSULTA EN TIEMPO REAL DE LAS ASIGNACIONES DE ESTA ESCUELA Y DE TODO EL MODELO
+            # Consultas en tiempo real
             try:
                 res_asig_escuela = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion={id_del_actual}").json().get("data", [])
                 res_todas_asig = requests.get(f"{API_URL}?action=GET_TODAS_ASIGNACIONES").json().get("data", [])
             except Exception:
-                res_asig_escuela = []
-                res_todas_asig = []
+                res_asig_escuela, res_todas_asig = [], []
 
-            # CÁLCULO DINÁMICO DE CUPOS RESTANTES DE LA ESCUELA
-            cupos_ya_usados = len(res_asig_escuela)
-            cupos_totales_contratados = int(escuela_actual.get("cupos_solicitados", 0)) if str(escuela_actual.get("cupos_solicitados", "0")).isdigit() else 0
-            cupos_restantes = max(0, cupos_totales_contratados - cupos_ya_usados)
-
-            # FILTRAR Y EXCLUIR PAÍSES QUE YA FUERON ASIGNADOS A CUALQUIER ESCUELA EN EL MODELO
-            paises_ya_asignados_global = set([str(a.get("pais")).strip().lower() for a in res_todas_asig if a.get("pais")])
-            lista_paises_disponibles = [p for p in lista_paises if str(p).strip().lower() not in paises_ya_asignados_global]
-
-            with col_b:
-                if not lista_paises_disponibles:
-                    st.warning("⚠️ Todos los países de la matriz ya fueron adjudicados.")
-                    pais_seleccionado = None
-                else:
-                    pais_seleccionado = st.selectbox("2. País Disponible a Asignar:", sorted(lista_paises_disponibles))
-
-            st.markdown("---")
-            
-            # Modalidades pedidas por la escuela
+            # 1. PARSEO DEL DESGLOSE DE MODALIDADES
             desglose_str = str(escuela_actual.get("desglose_modalidades", ""))
             modalidades_escuela = {}
             if desglose_str:
@@ -259,22 +239,67 @@ if admin_pass == "Secretaria2026":
                         if cant > 0:
                             modalidades_escuela[k.strip().lower()] = cant
 
-            escuela_tiene_cs = any("cs" in k or "9" in k or "con cs" in k for k in modalidades_escuela.keys())
-            escuela_tiene_eco = any("eco" in k or "ecosoc" in k for k in modalidades_escuela.keys())
-            escuela_tiene_davos = any("davos" in k for k in modalidades_escuela.keys())
+            # 2. MAPEO DINÁMICO DE INTEGRANTES POR MODALIDAD DESDE SHEETS
+            dict_modalidades_config = {
+                str(m.get("clave_modalidad", "")).strip().lower(): int(m.get("delegados_por_unidad", 1))
+                for m in modalidades_evento if str(m.get("delegados_por_unidad", "1")).isdigit()
+            }
 
+            # Fallback por si la solapa MODALIDADES_MODELO aún no está sincronizada
+            mapa_fallback = {
+                "del_5": 5,
+                "del_7_eco": 7,
+                "del_9_cs": 9,
+                "del_9": 9,
+                "del_7_seco_cs": 7,
+                "del_davos": 1,
+                "del_prensa": 3
+            }
+
+            # RECALCULO DE CUPOS TOTALES REALES
+            cupos_totales_contratados = 0
+            for k, cant_unidades in modalidades_escuela.items():
+                mult = dict_modalidades_config.get(k, mapa_fallback.get(k, 1))
+                cupos_totales_contratados += cant_unidades * mult
+
+            # Si el desglose viene vacío, usar el valor registrado en Sheets
+            if cupos_totales_contratados == 0:
+                cupos_totales_contratados = int(escuela_actual.get("cupos_solicitados", 0)) if str(escuela_actual.get("cupos_solicitados", "0")).isdigit() else 0
+
+            # CALCULO DE CUPOS USADOS Y LIBRES
+            cupos_ya_usados = len(res_asig_escuela)
+            cupos_restantes = max(0, cupos_totales_contratados - cupos_ya_usados)
+
+            # FILTRAR PAÍSES YA ASIGNADOS EN EL EVENTO
+            paises_ya_asignados_global = set([str(a.get("pais")).strip().lower() for a in res_todas_asig if a.get("pais")])
+            lista_paises_disponibles = [p for p in lista_paises if str(p).strip().lower() not in paises_ya_asignados_global]
+
+            with col_b:
+                if not lista_paises_disponibles:
+                    st.warning("⚠️ Todos los países de la matriz ya fueron adjudicados.")
+                    pais_seleccionado = None
+                else:
+                    pais_seleccionado = st.selectbox("2. País Disponible a Asignar:", sorted(lista_paises_disponibles))
+
+            st.markdown("---")
             st.markdown(f"#### 🔎 Estado de Asignación: **{escuela_actual.get('nombre_colegio')}**")
             
             col_e1, col_e2, col_e3 = st.columns(3)
             with col_e1:
-                st.info(f"👥 **Cupos Solicitados:** {cupos_totales_contratados}")
+                st.info(f"👥 **Cupos Totales Reales:** {cupos_totales_contratados} delegados")
             with col_e2:
-                st.warning(f"📌 **Cupos Ya Asignados:** {cupos_ya_usados}")
+                st.warning(f"📌 **Cupos Ya Asignados:** {cupos_ya_usados} lugares")
             with col_e3:
                 if cupos_restantes > 0:
-                    st.success(f"🟢 **Cupos Libres para Asignar:** {cupos_restantes}")
+                    st.success(f"🟢 **Cupos Libres Restantes:** {cupos_restantes} lugares")
                 else:
-                    st.error("🔴 **Cupos Agotados:** Esta escuela ya completó todas sus asignaciones.")
+                    st.error("🔴 **Cupos Agotados:** Escuela con asignaciones completadas.")
+
+            # DETALLE DEL DESGLOSE DE MODALIDADES
+            st.caption(f"📄 **Desglose contratado:** `{desglose_str}`")
+
+            escuela_tiene_cs = any("cs" in k or "9" in k or "con cs" in k for k in modalidades_escuela.keys())
+            escuela_tiene_eco = any("eco" in k or "ecosoc" in k for k in modalidades_escuela.keys())
 
             if pais_seleccionado and cupos_restantes > 0:
                 composicion_pais = [o for o in organos_matriz if str(o.get('pais', '')).strip().lower() == str(pais_seleccionado).strip().lower()]
@@ -299,13 +324,13 @@ if admin_pass == "Secretaria2026":
                         bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere asiento en **{organo_nombre}**, pero la escuela no solicitó ECOSOC.")
 
                 if tot_cupos_pais > cupos_restantes:
-                    bloqueos_criticos.append(f"⛔ **EXCESO DE CUPOS:** El país requiere **{tot_cupos_pais} lugares**, pero a la escuela solo le quedan **{cupos_restantes} cupos disponibles**.")
+                    bloqueos_criticos.append(f"⛔ **EXCESO DE CUPOS:** El país requiere **{tot_cupos_pais} lugares**, pero la escuela solo dispone de **{cupos_restantes} cupos libres**.")
 
                 if bloqueos_criticos:
                     for b in bloqueos_criticos:
                         st.error(b)
                 else:
-                    st.success(f"✅ **Compatibilidad Verificada:** Este país requiere {tot_cupos_pais} lugares y tenés {cupos_restantes} disponibles.")
+                    st.success(f"✅ **Compatibilidad Verificada:** Este país ocupa {tot_cupos_pais} lugares y te quedan {cupos_restantes} disponibles.")
 
                 puedo_asignar = len(bloqueos_criticos) == 0
 
@@ -319,13 +344,13 @@ if admin_pass == "Secretaria2026":
                             "pais": pais_seleccionado
                         }
                     }
-                    with st.spinner(f"Asignando {pais_seleccionado} a la planilla..."):
+                    with st.spinner(f"Asignando {pais_seleccionado}..."):
                         res = requests.post(API_URL, json=payload).json()
                         if res.get("status") == "SUCCESS":
-                            st.cache_data.clear()  # Limpia la memoria por completo
+                            st.cache_data.clear()
                             st.balloons()
                             st.success(f"🎉 ¡**{pais_seleccionado}** ({res.get('cupos_agregados')} cupos) fue asignado exitosamente!")
-                            st.rerun()  # Vuelve a cargar la interfaz actualizada inmediatamente
+                            st.rerun()
                         else:
                             st.error(f"Error del servidor: {res.get('message')}")
 
