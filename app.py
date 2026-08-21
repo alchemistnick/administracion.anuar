@@ -7,9 +7,9 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbw99vCAavy6ELN2LD7-jDYEa5mt2_gXEMm7a6dySthwNq4yYplspJGRGhbaK-APMrfoqQ/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbyM7_YhNDZdzKcrrTChJ0hfN_d7nCeQ5WC-y9Uk1VmSGyeKiyqaXxoT3mnJMYTRSqeaDQ/exec"
 
-st.title("🛡️ Panel Interno del Secretariado - Control y Auditoría")
+st.title("🛡️ Panel Interno del Secretariado - Control y Sorteo")
 
 @st.cache_data(ttl=60)
 def cargar_modelos_activos():
@@ -44,7 +44,7 @@ if admin_pass == "Secretaria2026":
         "Módulos de Gestión",
         [
             "1. Revisión de Pagos", 
-            "2. Asignación de Matriz (Países)",
+            "2. Asignación Automática de Sorteo",
             "3. Auditoría de Nóminas y Fichas",
             "4. Búsqueda por DNI / Alumno"
         ]
@@ -104,66 +104,91 @@ if admin_pass == "Secretaria2026":
             st.error(f"Error al conectar con la base de datos: {e}")
 
     # ---------------------------------------------------------
-    # MÓDULO 2: ASIGNACIÓN DE MATRIZ DE PAÍSES
+    # MÓDULO 2: ASIGNACIÓN AUTOMÁTICA DESDE MATRIZ DE PAÍSES
     # ---------------------------------------------------------
-    elif menu == "2. Asignación de Matriz (Países)":
-        st.subheader(f"Asignación de Representaciones por Escuela - {modelo_seleccionado}")
+    elif menu == "2. Asignación Automática de Sorteo":
+        st.subheader(f"⚡ Asignación Directa por Matriz Predefinida - {modelo_seleccionado}")
         
         try:
             res_del = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_modelo_actual}").json()
             escuelas_aprobadas = res_del.get("data", [])
+            
+            res_paises = requests.get(f"{API_URL}?action=GET_PAISES_MATRIZ&id_modelo={id_modelo_actual}").json()
+            lista_paises = res_paises.get("data", [])
+            
+            res_org = requests.get(f"{API_URL}?action=GET_ORGANOS&id_modelo={id_modelo_actual}").json()
+            organos_matriz = res_org.get("data", [])
         except Exception as e:
             escuelas_aprobadas = []
-            st.error(f"Error al consultar escuelas: {e}")
+            lista_paises = []
+            organos_matriz = []
+            st.error(f"Error al consultar la matriz de países: {e}")
 
         if not escuelas_aprobadas:
-            st.warning("No hay escuelas con pagos aprobados listos para asignar matriz.")
+            st.warning("No hay escuelas con pagos aprobados listos para el sorteo.")
+        elif not lista_paises:
+            st.warning("⚠️ No se encontraron países en la solapa ORGANOS para este modelo.")
         else:
-            opciones_del = {f"{d['id_delegacion']} - {d['nombre_colegio']}": d for d in escuelas_aprobadas}
-            escuela_sel_label = st.selectbox("Seleccioná la Escuela Aprobada:", list(opciones_del.keys()))
-            escuela_actual = opciones_del[escuela_sel_label]
+            col_a, col_b = st.columns(2)
             
-            st.markdown("---")
-            st.markdown(f"#### Asignar Representación a: **{escuela_actual['nombre_colegio']}** ({escuela_actual['id_delegacion']})")
+            with col_a:
+                opciones_del = {f"{d['id_delegacion']} - {d['nombre_colegio']}": d for d in escuelas_aprobadas}
+                escuela_sel_label = st.selectbox("1. Seleccioná la Escuela que sorteó:", list(opciones_del.keys()))
+                escuela_actual = opciones_del[escuela_sel_label]
             
-            with st.form("form_asignar_pais"):
-                col_asig1, col_asig2 = st.columns(2)
-                with col_asig1:
-                    pais_nombre = st.text_input("Nombre del País / Delegación (Ej: Uganda, Francia, Suiza)")
-                with col_asig2:
-                    organo_nombre = st.text_input("Comité / Puesto (Ej: AG1, Consejo de Seguridad, Embajador)")
-                
-                submitted_asig = st.form_submit_button("➕ Guardar Asignación en Matriz")
-                
-                if submitted_asig:
-                    if not pais_nombre or not organo_nombre:
-                        st.error("Completá el nombre del país y el comité.")
-                    else:
-                        payload = {
-                            "action": "ASIGNAR_REPRESENTACION",
-                            "usuario": "ADMIN",
-                            "data": {
-                                "id_modelo": id_modelo_actual,
-                                "id_delegacion": escuela_actual['id_delegacion'],
-                                "pais": pais_nombre,
-                                "organo": organo_nombre
-                            }
-                        }
-                        with st.spinner("Guardando asignación..."):
-                            res = requests.post(API_URL, json=payload).json()
-                            if res.get("status") == "SUCCESS":
-                                st.success(f"¡Asignado **{organo_nombre} - {pais_nombre}** a {escuela_actual['nombre_colegio']}!")
-                            else:
-                                st.error(f"Error: {res.get('message')}")
+            with col_b:
+                pais_seleccionado = st.selectbox("2. Seleccioná el País Sorteado:", sorted(lista_paises))
 
-            st.markdown("##### Asignaciones actuales de esta escuela:")
+            st.markdown("---")
+            
+            composicion_pais = [
+                o for o in organos_matriz 
+                if str(o.get('pais', '')).strip().lower() == str(pais_seleccionado).strip().lower()
+            ]
+            
+            st.markdown(f"#### 🔎 Vista Previa de la Representación: **{pais_seleccionado}**")
+            
+            tot_cupos = 0
+            if composicion_pais:
+                for c in composicion_pais:
+                    cupos = int(c.get('integrantes_totales', 1))
+                    tot_cupos += cupos
+                    st.write(f"• **{c.get('organo_comite')}**: {cupos} delegado(s)")
+                st.info(f"📊 La asignación creará automáticamente **{tot_cupos} cupos** en la base de datos.")
+            else:
+                st.caption("Seleccioná un país para ver su composición.")
+
+            if st.button(f"🚀 ASIGNAR {pais_seleccionado.upper()} A {escuela_actual['nombre_colegio'].upper()}"):
+                payload = {
+                    "action": "ASIGNAR_PAIS_AUTOMATICO_DESDE_MATRIZ",
+                    "usuario": "ADMIN",
+                    "data": {
+                        "id_modelo": id_modelo_actual,
+                        "id_delegacion": escuela_actual['id_delegacion'],
+                        "pais": pais_seleccionado
+                    }
+                }
+                with st.spinner("Vinculando matriz automática..."):
+                    res = requests.post(API_URL, json=payload).json()
+                    if res.get("status") == "SUCCESS":
+                        st.balloons()
+                        st.success(f"🎉 ¡**{pais_seleccionado}** ({res.get('cupos_agregados')} cupos) fue asignado exitosamente!")
+                    else:
+                        st.error(f"Error: {res.get('message')}")
+
+            st.markdown("---")
+            st.markdown("##### 📋 Países ya asignados a esta escuela:")
             res_asig_curr = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion={escuela_actual['id_delegacion']}").json()
             asig_list = res_asig_curr.get("data", [])
             if asig_list:
+                paises_resumen = {}
                 for a in asig_list:
-                    st.write(f"• **{a.get('pais')}** ({a.get('organo')})")
+                    p = a.get('pais')
+                    paises_resumen[p] = paises_resumen.get(p, 0) + 1
+                for p_k, p_v in paises_resumen.items():
+                    st.write(f"• **{p_k}**: {p_v} lugares asignados.")
             else:
-                st.caption("Aún no tiene países asignados.")
+                st.caption("Aún no tiene países adjudicados.")
 
     # ---------------------------------------------------------
     # MÓDULO 3: AUDITORÍA DE NÓMINAS Y FICHAS
