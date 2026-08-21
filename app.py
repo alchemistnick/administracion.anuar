@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-import re
+import json
 
 st.set_page_config(
     page_title="Secretariado - Control Interno MNU",
@@ -8,7 +8,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbwZim4YeUITbiOhsKpbKQPSrVqH-IwhoSTLZ5G_u1PhAQ2Z72VzqAL_OZb6nBvOjXC-mA/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbzCVDquLKvY64UMPLtZ6brcuC_1817FHCSvyVbOBVCAGhBA9F0KFiP31OMNMUfwDOHJ7Q/exec"
 
 st.title("🛡️ Panel Interno del Secretariado - Control y Sorteo")
 
@@ -118,12 +118,21 @@ if admin_pass == "Secretaria2026":
                     
                     for esc in pendientes_filtrados:
                         with st.expander(f"🏫 {esc.get('nombre_colegio')} ({esc.get('id_delegacion')}) - Solicitud de Cambio"):
-                            st.write(f"**Docente a cargo:** {esc.get('docente_cargo')} ({esc.get('email_contacto')})")
-                            st.write(f"**Detalle Solicitado:** {esc.get('desglose_modalidades')}")
+                            st.write(f"**Docente Responsable:** {esc.get('docente_cargo')} ({esc.get('email_contacto')}) | Teléfono: {esc.get('telefono_contacto')}")
                             
-                            # Extraer automáticamente la propuesta de nuevos cupos
-                            match_cupos = re.search(r'Cupos:\s*(\d+)', str(esc.get('desglose_modalidades')))
-                            nuevos_cupos = int(match_cupos.group(1)) if match_cupos else int(esc.get('cupos_solicitados', 0))
+                            propuesta_raw = esc.get("propuesta_modificacion", "{}")
+                            try:
+                                prop = json.loads(propuesta_raw)
+                            except Exception:
+                                prop = {}
+
+                            nuevos_cupos = prop.get("nuevos_cupos", esc.get("cupos_solicitados"))
+                            nuevo_desglose = prop.get("nuevo_desglose", esc.get("desglose_modalidades"))
+                            docentes_acomp = prop.get("docentes_acompanantes", esc.get("docentes_acompanantes"))
+
+                            st.write(f"• **Nuevos Cupos Estudiantes:** {nuevos_cupos}")
+                            st.write(f"• **Nuevos Docentes Acompañantes:** {docentes_acomp}")
+                            st.write(f"• **Detalle Desglose:** {nuevo_desglose}")
                             
                             col_m1, col_m2 = st.columns(2)
                             with col_m1:
@@ -135,7 +144,8 @@ if admin_pass == "Secretaria2026":
                                             "id_delegacion": esc['id_delegacion'],
                                             "aprobar": True,
                                             "nuevos_cupos": nuevos_cupos,
-                                            "nuevo_desglose": esc.get('desglose_modalidades')
+                                            "nuevo_desglose": nuevo_desglose,
+                                            "docentes_acompanantes": docentes_acomp
                                         }
                                     }
                                     r = requests.post(API_URL, json=payload).json()
@@ -267,10 +277,11 @@ if admin_pass == "Secretaria2026":
             
             tabla_resumen = []
             for n in todas_nominas:
+                nombre_comp = f"{n.get('nombre', '')} {n.get('apellido', '')}".strip() or n.get("nombre_completo", "")
                 tabla_resumen.append({
                     "ID Delegado": n.get("id_delegado"),
                     "Escuela/ID": n.get("id_delegacion"),
-                    "Nombre Completo": n.get("nombre_completo"),
+                    "Nombre Completo": nombre_comp,
                     "DNI": n.get("dni"),
                     "Rol / Representación": n.get("rol_mnu"),
                     "Ficha ID": "✅ Cargada" if n.get("drive_ficha_id") != "-" else "❌ Pendiente",
@@ -286,7 +297,7 @@ if admin_pass == "Secretaria2026":
     elif menu == "4. Búsqueda por DNI / Alumno":
         st.subheader(f"🔍 Buscador Global de Participantes - {modelo_seleccionado}")
         
-        busqueda = st.text_input("Ingresá el DNI, Nombre o Código de Delegación (Ej: DEL-001):")
+        busqueda = st.text_input("Ingresá el DNI, Nombre, Apellido o Código de Delegación (Ej: DEL-001):")
         
         if busqueda:
             try:
@@ -297,6 +308,8 @@ if admin_pass == "Secretaria2026":
                 resultados = [
                     n for n in todas_nominas 
                     if query in str(n.get("dni", "")).lower() 
+                    or query in str(n.get("nombre", "")).lower() 
+                    or query in str(n.get("apellido", "")).lower()
                     or query in str(n.get("nombre_completo", "")).lower() 
                     or query in str(n.get("id_delegacion", "")).lower()
                 ]
@@ -307,7 +320,8 @@ if admin_pass == "Secretaria2026":
                     st.success(f"Se encontraron **{len(resultados)}** coincidencia(s):")
                     
                     for r in resultados:
-                        with st.expander(f"👤 {r.get('nombre_completo')} | DNI: {r.get('dni')} | Escuela: {r.get('id_delegacion')}"):
+                        nombre_mostrar = f"{r.get('nombre', '')} {r.get('apellido', '')}".strip() or r.get("nombre_completo", "")
+                        with st.expander(f"👤 {nombre_mostrar} | DNI: {r.get('dni')} | Escuela: {r.get('id_delegacion')}"):
                             st.write(f"**Rol / Comisión:** {r.get('rol_mnu')}")
                             st.write(f"**Indicaciones Médicas / Alergias:** {r.get('alergias_medicas')}")
                             
