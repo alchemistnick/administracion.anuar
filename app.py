@@ -7,7 +7,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbyLfop6lvmgxhxHcZFrI8BtjXHZqhtD6smqPC8xedVeg_SB8lQJ8NbA-jSLPjFXvk26/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbw99vCAavy6ELN2LD7-jDYEa5mt2_gXEMm7a6dySthwNq4yYplspJGRGhbaK-APMrfoqQ/exec"
 
 st.title("🛡️ Panel Interno del Secretariado - Control y Auditoría")
 
