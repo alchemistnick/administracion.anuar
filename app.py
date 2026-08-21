@@ -9,10 +9,10 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbzCVDquLKvY64UMPLtZ6brcuC_1817FHCSvyVbOBVCAGhBA9F0KFiP31OMNMUfwDOHJ7Q/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbz0zBX3gXipKIXKAb5ZNHfQMy1YVYJrXVAf51IydmmDIdPM-VSMa91_HSmBdvsGL4Q4yw/exec"
 
 # =========================================================
-# FUNCIONES DE CACHÉ GLOBALES (BLINDADAS CONTRA ERRORES)
+# FUNCIONES DE CACHÉ OPTIMIZADAS
 # =========================================================
 
 @st.cache_data(ttl=60)
@@ -26,29 +26,22 @@ def cargar_modelos_activos():
     except Exception:
         return {}
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=15)
 def cargar_datos_sorteo(id_mod):
     try:
         r_del = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_mod}").json().get("data", [])
         r_pai = requests.get(f"{API_URL}?action=GET_PAISES_MATRIZ&id_modelo={id_mod}").json().get("data", [])
         r_org = requests.get(f"{API_URL}?action=GET_ORGANOS&id_modelo={id_mod}").json().get("data", [])
         r_mod = requests.get(f"{API_URL}?action=GET_MODALIDADES_MODELO&id_modelo={id_mod}").json().get("data", [])
-        return r_del, r_pai, r_org, r_mod
+        r_asig = requests.get(f"{API_URL}?action=GET_TODAS_ASIGNACIONES").json().get("data", [])
+        return r_del, r_pai, r_org, r_mod, r_asig
     except Exception:
-        return [], [], [], []
+        return [], [], [], [], []
 
 @st.cache_data(ttl=30)
 def cargar_todas_nominas_cached(id_mod):
     try:
         res = requests.get(f"{API_URL}?action=GET_TODAS_NOMINAS&id_modelo={id_mod}").json()
-        return res.get("data", [])
-    except Exception:
-        return []
-
-@st.cache_data(ttl=10)
-def cargar_asignaciones_escuela_cached(id_del):
-    try:
-        res = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion={id_del}").json()
         return res.get("data", [])
     except Exception:
         return []
@@ -89,33 +82,31 @@ if admin_pass == "Secretaria2026":
     )
 
     # ---------------------------------------------------------
-    # MÓDULO 0: DASHBOARD Y CUADRO DE MÉTRICAS DEL EVENTO
+    # MÓDULO 0: DASHBOARD
     # ---------------------------------------------------------
     if menu == "📊 Dashboard & Estado del Modelo":
         st.subheader(f"📈 Estado General del Evento - {modelo_seleccionado}")
         
-        with st.spinner("Cargando métricas en tiempo real..."):
-            escuelas_aprobadas, _, organos_matriz, _ = cargar_datos_sorteo(id_modelo_actual)
+        with st.spinner("Cargando métricas..."):
+            escuelas_aprobadas, _, organos_matriz, _, _ = cargar_datos_sorteo(id_modelo_actual)
             todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
 
         m1, m2, m3, m4 = st.columns(4)
         with m1:
-            st.metric("🏫 Escuelas Preinscriptas Aprobadas", len(escuelas_aprobadas))
+            st.metric("🏫 Escuelas Aprobadas", len(escuelas_aprobadas))
         with m2:
             tot_cupos = sum([int(e.get("cupos_solicitados", 0)) for e in escuelas_aprobadas if str(e.get("cupos_solicitados", "0")).isdigit()])
-            st.metric("👥 Cupos Estudiantiles Aprobados", tot_cupos)
+            st.metric("👥 Cupos Solicitados", tot_cupos)
         with m3:
             st.metric("👤 Participantes Cargados", len(todas_nominas))
         with m4:
             fichas_ok = sum([1 for n in todas_nominas if n.get("drive_ficha_id") and str(n.get("drive_ficha_id")).strip() != "-"])
-            st.metric("📄 Fichas Médicas Recibidas", fichas_ok)
+            st.metric("📄 Fichas Médicas", fichas_ok)
 
         st.markdown("---")
         st.markdown("### 🏛️ Matriz de Representación: Países y Cupos por Órgano / Comité")
 
-        if not organos_matriz:
-            st.info("No hay información de la matriz de órganos cargada en la pestaña ORGANOS para este modelo.")
-        else:
+        if organos_matriz:
             df_organos = pd.DataFrame(organos_matriz)
             if "integrantes_totales" in df_organos.columns:
                 df_organos["integrantes_totales"] = pd.to_numeric(df_organos["integrantes_totales"], errors='coerce').fillna(1)
@@ -125,22 +116,21 @@ if admin_pass == "Secretaria2026":
                     Total_Delegados=("integrantes_totales", "sum")
                 ).reset_index()
 
-                resumen_organos.columns = ["Órgano / Comité", "Paises Representados", "Cupos / Delegados Totales"]
+                resumen_organos.columns = ["Órgano / Comité", "Paises Representados", "Cupos Totales"]
 
                 col_t1, col_t2 = st.columns([2, 1])
                 with col_t1:
                     st.dataframe(resumen_organos, use_container_width=True, hide_index=True)
                 with col_t2:
-                    st.markdown("#### 📊 Distribución de Cupos")
+                    st.markdown("#### 📊 Resumen de Representaciones")
                     for _, row in resumen_organos.iterrows():
-                        st.write(f"• **{row['Órgano / Comité']}**: {row['Paises Representados']} países ({int(row['Cupos / Delegados Totales'])} delegados)")
+                        st.write(f"• **{row['Órgano / Comité']}**: {row['Paises Representados']} países ({int(row['Cupos Totales'])} lugares)")
 
     # ---------------------------------------------------------
     # MÓDULO 1: REVISIÓN DE PAGOS Y MODIFICACIONES
     # ---------------------------------------------------------
     elif menu == "1. Revisión de Pagos y Modificaciones":
         st.subheader(f"Auditoría General - {modelo_seleccionado}")
-        
         tab_pagos, tab_modificaciones = st.tabs(["💳 Comprobantes de Pago", "✏️ Solicitudes de Cambio de Cupos"])
         
         with tab_pagos:
@@ -150,125 +140,77 @@ if admin_pass == "Secretaria2026":
                 pagos_filtrados = [p for p in pagos if p.get("id_modelo") == id_modelo_actual or not p.get("id_modelo")]
                 
                 if not pagos_filtrados:
-                    st.success(f"No hay comprobantes pendientes de revisión para {modelo_seleccionado}.")
+                    st.success(f"No hay comprobantes pendientes para {modelo_seleccionado}.")
                 else:
-                    st.info(f"Se encontraron **{len(pagos_filtrados)}** comprobantes pendientes de acreditación.")
                     for pago in pagos_filtrados:
                         with st.expander(f"💳 Pago {pago.get('id_pago', '-')} | Delegación: {pago.get('id_delegacion', '-')} | Monto: ${pago.get('monto', 0)}"):
                             col_a, col_b = st.columns([2, 1])
                             with col_a:
-                                st.write(f"**Fecha de Subida:** {pago.get('fecha_subida', '-')}")
+                                st.write(f"**Fecha:** {pago.get('fecha_subida', '-')}")
                                 if pago.get('drive_file_url') and pago['drive_file_url'] != "-":
-                                    st.markdown(f"[📄 **Ver Comprobante Adjunto en Drive**]({pago['drive_file_url']})", unsafe_allow_html=True)
-                            
+                                    st.markdown(f"[📄 **Ver Comprobante**]({pago['drive_file_url']})", unsafe_allow_html=True)
                             with col_b:
                                 if st.button("✅ APROBAR PAGO", key=f"app_{pago.get('id_pago')}"):
-                                    payload = {
-                                        "action": "CAMBIAR_ESTADO_PAGO",
-                                        "usuario": "ADMIN",
-                                        "data": {"id_pago": pago.get('id_pago'), "nuevo_estado": "APROBADO"}
-                                    }
+                                    payload = {"action": "CAMBIAR_ESTADO_PAGO", "usuario": "ADMIN", "data": {"id_pago": pago.get('id_pago'), "nuevo_estado": "APROBADO"}}
                                     r = requests.post(API_URL, json=payload).json()
                                     if r.get("status") == "SUCCESS":
                                         st.cache_data.clear()
-                                        st.success("Pago Aprobado con Éxito")
-                                        st.rerun()
-
-                                if st.button("❌ RECHAZAR PAGO", key=f"rej_{pago.get('id_pago')}"):
-                                    payload = {
-                                        "action": "CAMBIAR_ESTADO_PAGO",
-                                        "usuario": "ADMIN",
-                                        "data": {"id_pago": pago.get('id_pago'), "nuevo_estado": "RECHAZADO"}
-                                    }
-                                    r = requests.post(API_URL, json=payload).json()
-                                    if r.get("status") == "SUCCESS":
-                                        st.cache_data.clear()
-                                        st.warning("Pago Rechazado")
+                                        st.success("Aprobado")
                                         st.rerun()
             except Exception as e:
-                st.error(f"Error al conectar con la base de datos: {e}")
+                st.error(f"Error: {e}")
 
         with tab_modificaciones:
             try:
                 res_mod = requests.get(f"{API_URL}?action=GET_MODIFICACIONES_PENDIENTES").json()
                 pendientes_mod = res_mod.get("data", [])
-                
                 pendientes_filtrados = [d for d in pendientes_mod if d.get("id_modelo") == id_modelo_actual or not d.get("id_modelo")]
                 
                 if not pendientes_filtrados:
-                    st.success("No hay solicitudes de modificación de cupos pendientes.")
+                    st.success("No hay solicitudes pendientes.")
                 else:
-                    st.warning(f"Hay **{len(pendientes_filtrados)}** solicitudes de cambio en espera de validación:")
-                    
                     for esc in pendientes_filtrados:
-                        with st.expander(f"🏫 {esc.get('nombre_colegio')} ({esc.get('id_delegacion')}) - Solicitud de Cambio"):
-                            st.write(f"**Docente Responsable:** {esc.get('docente_cargo')} ({esc.get('email_contacto')}) | Teléfono: {esc.get('telefono_contacto')}")
-                            
+                        with st.expander(f"🏫 {esc.get('nombre_colegio')} ({esc.get('id_delegacion')})"):
+                            st.write(f"**Contacto:** {esc.get('docente_cargo')} ({esc.get('email_contacto')})")
                             propuesta_raw = esc.get("propuesta_modificacion", "{}")
                             try:
                                 prop = json.loads(propuesta_raw)
                             except Exception:
                                 prop = {}
-
+                            
                             nuevos_cupos = prop.get("nuevos_cupos", esc.get("cupos_solicitados"))
                             nuevo_desglose = prop.get("nuevo_desglose", esc.get("desglose_modalidades"))
                             docentes_acomp = prop.get("docentes_acompanantes", esc.get("docentes_acompanantes"))
 
                             st.write(f"• **Nuevos Cupos Estudiantes:** {nuevos_cupos}")
-                            st.write(f"• **Nuevos Docentes Acompañantes:** {docentes_acomp}")
-                            st.write(f"• **Detalle Desglose:** {nuevo_desglose}")
+                            st.write(f"• **Nuevos Docentes:** {docentes_acomp}")
+                            st.write(f"• **Desglose:** {nuevo_desglose}")
                             
                             col_m1, col_m2 = st.columns(2)
                             with col_m1:
                                 if st.button("✅ APROBAR MODIFICACIÓN", key=f"app_mod_{esc.get('id_delegacion')}"):
-                                    payload = {
-                                        "action": "RESPONDER_MODIFICACION_PREINSCRIPCION",
-                                        "usuario": "ADMIN",
-                                        "data": {
-                                            "id_delegacion": esc.get('id_delegacion'),
-                                            "aprobar": True,
-                                            "nuevos_cupos": nuevos_cupos,
-                                            "nuevo_desglose": nuevo_desglose,
-                                            "docentes_acompanantes": docentes_acomp
-                                        }
-                                    }
+                                    payload = {"action": "RESPONDER_MODIFICACION_PREINSCRIPCION", "usuario": "ADMIN", "data": {"id_delegacion": esc.get('id_delegacion'), "aprobar": True, "nuevos_cupos": nuevos_cupos, "nuevo_desglose": nuevo_desglose, "docentes_acompanantes": docentes_acomp}}
                                     r = requests.post(API_URL, json=payload).json()
                                     if r.get("status") == "SUCCESS":
                                         st.cache_data.clear()
-                                        st.success("Modificación Aprobada.")
-                                        st.rerun()
-
-                            with col_m2:
-                                if st.button("❌ RECHAZAR CAMBIO", key=f"rej_mod_{esc.get('id_delegacion')}"):
-                                    payload = {
-                                        "action": "RESPONDER_MODIFICACION_PREINSCRIPCION",
-                                        "usuario": "ADMIN",
-                                        "data": {
-                                            "id_delegacion": esc.get('id_delegacion'),
-                                            "aprobar": False
-                                        }
-                                    }
-                                    r = requests.post(API_URL, json=payload).json()
-                                    if r.get("status") == "SUCCESS":
-                                        st.cache_data.clear()
-                                        st.info("Modificación Rechazada.")
+                                        st.success("Aprobado")
                                         st.rerun()
             except Exception as e:
-                st.error(f"Error al consultar solicitudes de modificación: {e}")
+                st.error(f"Error: {e}")
 
     # ---------------------------------------------------------
-    # MÓDULO 2: ASIGNACIÓN RÁPIDA Y STRICTA DE PAÍSES (CORREGIDO)
+    # MÓDULO 2: ASIGNACIÓN DE SORTEO (CORREGIDO MULTI-PAÍS)
     # ---------------------------------------------------------
     elif menu == "2. Asignación Automática de Sorteo":
         st.subheader(f"⚡ Asignación Directa y Validación de Cupos - {modelo_seleccionado}")
 
-        with st.spinner("Sincronizando matriz de sorteo..."):
-            escuelas_aprobadas, lista_paises, organos_matriz, modalidades_evento = cargar_datos_sorteo(id_modelo_actual)
+        with st.spinner("Sincronizando matriz..."):
+            escuelas_aprobadas, lista_paises, organos_matriz, modalidades_evento, todas_asignaciones = cargar_datos_sorteo(id_modelo_actual)
 
         if not escuelas_aprobadas:
-            st.warning("No hay escuelas con pagos aprobados disponibles para asignar.")
+            st.warning("No hay escuelas con pagos aprobados disponibles.")
         elif not lista_paises:
-            st.warning("⚠️ No se encontraron países en la solapa ORGANOS para este modelo.")
+            st.warning("⚠️ No hay países configurados en la solapa ORGANOS.")
         else:
             col_a, col_b = st.columns(2)
             
@@ -276,16 +218,28 @@ if admin_pass == "Secretaria2026":
                 opciones_del = {f"{d.get('id_delegacion', 'DEL')} - {d.get('nombre_colegio', 'Escuela')}": d for d in escuelas_aprobadas if d.get('id_delegacion')}
                 escuela_sel_label = st.selectbox("1. Escuela que realizó el Sorteo:", list(opciones_del.keys()))
                 escuela_actual = opciones_del[escuela_sel_label]
-            
+                id_del_actual = str(escuela_actual.get('id_delegacion')).strip()
+
+            # CALCULAR CUPOS YA ASIGNADOS A ESTA ESCUELA
+            asig_escuela_actual = [a for a in todas_asignaciones if str(a.get("id_delegacion_asignada")).strip() == id_del_actual]
+            cupos_ya_usados = len(asig_escuela_actual)
+            cupos_totales_contratados = int(escuela_actual.get("cupos_solicitados", 0)) if str(escuela_actual.get("cupos_solicitados", "0")).isdigit() else 0
+            cupos_restantes = max(0, cupos_totales_contratados - cupos_ya_usados)
+
+            # EXCLUIR PAÍSES YA ASIGNADOS EN EL MODELO
+            paises_ya_asignados = set([str(a.get("pais")).strip().lower() for a in todas_asignaciones if a.get("pais")])
+            lista_paises_disponibles = [p for p in lista_paises if str(p).strip().lower() not in paises_ya_asignados]
+
             with col_b:
-                lista_paises_valida = [p for p in lista_paises if p]
-                pais_seleccionado = st.selectbox("2. País a Asignar:", sorted(lista_paises_valida))
+                if not lista_paises_disponibles:
+                    st.warning("⚠️ Todos los países de la matriz ya fueron asignados.")
+                    pais_seleccionado = None
+                else:
+                    pais_seleccionado = st.selectbox("2. País Disponible a Asignar:", sorted(lista_paises_disponibles))
 
             st.markdown("---")
             
-            cupos_autorizados = int(escuela_actual.get("cupos_solicitados", 0)) if str(escuela_actual.get("cupos_solicitados", "0")).isdigit() else 0
             desglose_str = str(escuela_actual.get("desglose_modalidades", ""))
-            
             modalidades_escuela = {}
             if desglose_str:
                 items = desglose_str.split("|")
@@ -296,50 +250,27 @@ if admin_pass == "Secretaria2026":
                         if cant > 0:
                             modalidades_escuela[k.strip().lower()] = cant
 
-            escuela_tiene_cs = False
-            escuela_tiene_eco = False
-            escuela_tiene_davos = False
-            escuela_tiene_prensa = False
+            escuela_tiene_cs = any("cs" in k or "9" in k or "con cs" in k for k in modalidades_escuela.keys())
+            escuela_tiene_eco = any("eco" in k or "ecosoc" in k for k in modalidades_escuela.keys())
+            escuela_tiene_davos = any("davos" in k for k in modalidades_escuela.keys())
 
-            dict_modalidades_config = {str(m.get("clave_modalidad", "")).strip().lower(): m for m in modalidades_evento}
-
-            for clave_mod in modalidades_escuela.keys():
-                config_mod = dict_modalidades_config.get(clave_mod, {})
-                etiqueta = str(config_mod.get("etiqueta_visible", "")).lower()
-                clave_lower = str(clave_mod).lower()
-
-                if "cs" in clave_lower or "consejo" in etiqueta or "con cs" in etiqueta:
-                    if "sin cs" not in etiqueta or "seco_cs" in clave_lower or "9" in clave_lower:
-                        escuela_tiene_cs = True
-                
-                if "eco" in clave_lower or "ecosoc" in etiqueta or "con ecosoc" in etiqueta:
-                    if "sin ecosoc" not in etiqueta and "sin_ecosoc" not in clave_lower:
-                        escuela_tiene_eco = True
-
-                if "davos" in clave_lower or "davos" in etiqueta:
-                    escuela_tiene_davos = True
-
-                if "prensa" in clave_lower or "prensa" in etiqueta:
-                    escuela_tiene_prensa = True
-
-            composicion_pais = [
-                o for o in organos_matriz 
-                if str(o.get('pais', '')).strip().lower() == str(pais_seleccionado).strip().lower()
-            ]
+            st.markdown(f"#### 🔎 Estado de Asignación: **{escuela_actual.get('nombre_colegio')}**")
             
-            st.markdown(f"#### 🔎 Análisis de Viabilidad: **{pais_seleccionado}** ➔ **{escuela_actual.get('nombre_colegio', '')}**")
-            
-            col_e1, col_e2 = st.columns(2)
+            col_e1, col_e2, col_e3 = st.columns(3)
             with col_e1:
-                st.info(f"📋 **Modalidades contratadas:** `{desglose_str}`")
+                st.info(f"👥 **Cupos Totales Comprados:** {cupos_totales_contratados}")
             with col_e2:
-                st.info(f"👥 **Cupos Totales Autorizados:** {cupos_autorizados} delegados")
+                st.warning(f"📌 **Cupos Ya Asignados:** {cupos_ya_usados}")
+            with col_e3:
+                st.success(f"🟢 **Cupos Libres Restantes:** {cupos_restantes}")
 
-            bloqueos_criticos = []
-            tot_cupos_pais = 0
+            if pais_seleccionado:
+                composicion_pais = [o for o in organos_matriz if str(o.get('pais', '')).strip().lower() == str(pais_seleccionado).strip().lower()]
+                
+                bloqueos_criticos = []
+                tot_cupos_pais = 0
 
-            if composicion_pais:
-                st.markdown("##### Comités requeridos por este país:")
+                st.markdown(f"##### Comités requeridos por **{pais_seleccionado}**:")
                 for c in composicion_pais:
                     cupos = int(c.get('integrantes_totales', 1)) if str(c.get('integrantes_totales', '1')).isdigit() else 1
                     organo_nombre = str(c.get('organo_comite', '')).strip()
@@ -350,56 +281,47 @@ if admin_pass == "Secretaria2026":
 
                     if ("consejo de seguridad" in organo_lower or "cs" in organo_lower) and "ecosoc" not in organo_lower:
                         if not escuela_tiene_cs:
-                            bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere asiento en **{organo_nombre}**, pero la escuela NO compró ninguna modalidad con Consejo de Seguridad.")
+                            bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere asiento en **{organo_nombre}**, pero la escuela no solicitó modalidad con CS.")
                     
-                    if "ecosoc" in organo_lower:
-                        if not escuela_tiene_eco:
-                            bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere asiento en **{organo_nombre}**, pero la escuela NO compró ninguna modalidad con ECOSOC.")
+                    if "ecosoc" in organo_lower and not escuela_tiene_eco:
+                        bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere asiento en **{organo_nombre}**, pero la escuela no solicitó ECOSOC.")
 
-                    if "davos" in organo_lower and not escuela_tiene_davos:
-                        bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} pertenece al **Foro de Davos**, y la escuela no preinscribió cupos para Davos.")
+                if tot_cupos_pais > cupos_restantes:
+                    bloqueos_criticos.append(f"⛔ **EXCESO DE CUPOS:** El país requiere **{tot_cupos_pais} lugares**, pero la escuela solo tiene **{cupos_restantes} cupos libres**.")
 
-                    if "prensa" in organo_lower and not escuela_tiene_prensa:
-                        bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere **Comité de Prensa**, no contratado por la escuela.")
+                if bloqueos_criticos:
+                    for b in bloqueos_criticos:
+                        st.error(b)
+                else:
+                    st.success("✅ **Compatibilidad Verificada:** Podés proceder con la asignación.")
 
-                if tot_cupos_pais > cupos_autorizados:
-                    bloqueos_criticos.append(f"⛔ **EXCESO DE CUPOS:** El país requiere **{tot_cupos_pais} integrantes**, pero el colegio solo dispone de **{cupos_autorizados} cupos**.")
+                puedo_asignar = len(bloqueos_criticos) == 0
 
-            if bloqueos_criticos:
-                for b in bloqueos_criticos:
-                    st.error(b)
-            else:
-                st.success("✅ **Compatibilidad Verificada:** La escuela cuenta con las modalidades y cupos necesarios para este país.")
-
-            puedo_asignar = len(bloqueos_criticos) == 0
-
-            if st.button(f"🚀 ASIGNAR {str(pais_seleccionado).upper()}", disabled=not puedo_asignar):
-                payload = {
-                    "action": "ASIGNAR_PAIS_AUTOMATICO_DESDE_MATRIZ",
-                    "usuario": "ADMIN",
-                    "data": {
-                        "id_modelo": id_modelo_actual,
-                        "id_delegacion": escuela_actual.get('id_delegacion'),
-                        "pais": pais_seleccionado
+                if st.button(f"🚀 ASIGNAR {str(pais_seleccionado).upper()}", disabled=not puedo_asignar):
+                    payload = {
+                        "action": "ASIGNAR_PAIS_AUTOMATICO_DESDE_MATRIZ",
+                        "usuario": "ADMIN",
+                        "data": {
+                            "id_modelo": id_modelo_actual,
+                            "id_delegacion": id_del_actual,
+                            "pais": pais_seleccionado
+                        }
                     }
-                }
-                with st.spinner("Procesando asignación..."):
-                    res = requests.post(API_URL, json=payload).json()
-                    if res.get("status") == "SUCCESS":
-                        st.cache_data.clear()
-                        st.balloons()
-                        st.success(f"🎉 ¡**{pais_seleccionado}** ({res.get('cupos_agregados')} cupos) fue asignado a {escuela_actual.get('nombre_colegio')}!")
-                        st.rerun()
-                    else:
-                        st.error(f"Error del servidor: {res.get('message')}")
+                    with st.spinner("Procesando asignación..."):
+                        res = requests.post(API_URL, json=payload).json()
+                        if res.get("status") == "SUCCESS":
+                            st.cache_data.clear()
+                            st.balloons()
+                            st.success(f"🎉 ¡**{pais_seleccionado}** ({res.get('cupos_agregados')} cupos) fue asignado con éxito!")
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {res.get('message')}")
 
             st.markdown("---")
-            st.markdown("##### 📋 Asignaciones actuales de esta escuela:")
-            
-            asig_list = cargar_asignaciones_escuela_cached(escuela_actual.get('id_delegacion'))
-            if asig_list:
+            st.markdown("##### 📋 Países ya asignados a esta escuela:")
+            if asig_escuela_actual:
                 paises_resumen = {}
-                for a in asig_list:
+                for a in asig_escuela_actual:
                     p = a.get('pais')
                     paises_resumen[p] = paises_resumen.get(p, 0) + 1
                 for p_k, p_v in paises_resumen.items():
@@ -408,21 +330,20 @@ if admin_pass == "Secretaria2026":
                 st.caption("Esta escuela aún no tiene países asignados.")
 
     # ---------------------------------------------------------
-    # MÓDULO 3: SOLAPA DEDUCTIVA Y COMPLETA DE NÓMINA GENERAL
+    # MÓDULO 3 Y 4: NÓMINA Y BÚSQUEDA
     # ---------------------------------------------------------
     elif menu == "3. Nómina General de Participantes":
         st.subheader(f"📋 Nómina Consolidada de Participantes - {modelo_seleccionado}")
-        
         todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
 
         if not todas_nominas:
-            st.info("Aún no hay participantes cargados en la base de datos para este modelo.")
+            st.info("Aún no hay participantes cargados.")
         else:
             col_f1, col_f2 = st.columns([2, 1])
             with col_f1:
                 filtro_busqueda = st.text_input("🔍 Filtrar por Nombre, Apellido, DNI o Escuela:")
             with col_f2:
-                filtro_doc = st.selectbox("Filtrar por Estado de Documentación:", ["Todos", "Ficha Médica Pendiente", "Autorización Pendiente", "Documentación Completa"])
+                filtro_doc = st.selectbox("Estado Documentación:", ["Todos", "Ficha Médica Pendiente", "Autorización Pendiente", "Documentación Completa"])
 
             lista_procesada = []
             for n in todas_nominas:
@@ -448,63 +369,32 @@ if admin_pass == "Secretaria2026":
                     "Nombre": n.get("nombre", "-"),
                     "Apellido": n.get("apellido", "-"),
                     "DNI": n.get("dni", "-"),
-                    "Rol / Representación": n.get("rol_mnu", "-"),
+                    "Rol": n.get("rol_mnu", "-"),
                     "Ficha Médica": "✅ OK" if ficha_ok else "❌ Pendiente",
-                    "Autorización Imagen": "✅ OK" if aut_ok else "❌ Pendiente",
-                    "Alergias / Cuidados Médicos": n.get("alergias_medicas", "Ninguna")
+                    "Autorización Imagen": "✅ OK" if aut_ok else "❌ Pendiente"
                 })
 
-            st.markdown(f"**Mostrando {len(lista_procesada)} de {len(todas_nominas)} participantes.**")
             st.dataframe(pd.DataFrame(lista_procesada), use_container_width=True, hide_index=True)
 
-    # ---------------------------------------------------------
-    # MÓDULO 4: BÚSQUEDA RÁPIDA POR DNI / ALUMNO
-    # ---------------------------------------------------------
     elif menu == "4. Búsqueda Rápida por DNI":
         st.subheader(f"🔍 Buscador Global de Participantes - {modelo_seleccionado}")
-        
-        busqueda = st.text_input("Ingresá el DNI, Nombre, Apellido o Código de Delegación (Ej: DEL-001):")
+        busqueda = st.text_input("Ingresá DNI, Nombre, Apellido o ID Delegación:")
         
         if busqueda:
             todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
-            
             query = busqueda.strip().lower()
-            resultados = [
-                n for n in todas_nominas 
-                if query in str(n.get("dni", "")).lower() 
-                or query in str(n.get("nombre", "")).lower() 
-                or query in str(n.get("apellido", "")).lower()
-                or query in str(n.get("nombre_completo", "")).lower() 
-                or query in str(n.get("id_delegacion", "")).lower()
-            ]
+            resultados = [n for n in todas_nominas if query in str(n.get("dni", "")).lower() or query in str(n.get("nombre", "")).lower() or query in str(n.get("apellido", "")).lower() or query in str(n.get("id_delegacion", "")).lower()]
             
             if not resultados:
-                st.warning(f"No se encontraron participantes que coincidan con '{busqueda}'.")
+                st.warning(f"No hay coincidencias para '{busqueda}'.")
             else:
-                st.success(f"Se encontraron **{len(resultados)}** coincidencia(s):")
-                
                 for r in resultados:
                     nombre_mostrar = f"{r.get('nombre', '')} {r.get('apellido', '')}".strip() or r.get("nombre_completo", "")
                     with st.expander(f"👤 {nombre_mostrar} | DNI: {r.get('dni', '-')} | Escuela: {r.get('id_delegacion', '-')}"):
-                        st.write(f"**Rol / Comisión:** {r.get('rol_mnu', '-')}")
-                        st.write(f"**Indicaciones Médicas / Alergias:** {r.get('alergias_medicas', 'Ninguna')}")
-                        
-                        col_f1, col_f2 = st.columns(2)
-                        with col_f1:
-                            ficha_id = r.get("drive_ficha_id")
-                            if ficha_id and str(ficha_id).strip() != "-":
-                                st.markdown(f"[📄 Ver Ficha Médica en Drive](https://drive.google.com/file/d/{ficha_id}/view)", unsafe_allow_html=True)
-                            else:
-                                st.caption("Ficha médica no adjuntada.")
-                                
-                        with col_f2:
-                            aut_id = r.get("drive_autorizacion_id")
-                            if aut_id and str(aut_id).strip() != "-":
-                                st.markdown(f"[📄 Ver Autorización en Drive](https://drive.google.com/file/d/{aut_id}/view)", unsafe_allow_html=True)
-                            else:
-                                st.caption("Autorización de imagen no adjuntada.")
+                        st.write(f"**Rol:** {r.get('rol_mnu', '-')}")
+                        st.write(f"**Alergias:** {r.get('alergias_medicas', 'Ninguna')}")
 
 elif admin_pass:
-    st.error("🔒 Contraseña incorrecta. Acceso denegado al Panel del Secretariado.")
+    st.error("🔒 Contraseña incorrecta.")
 else:
-    st.warning("👈 Por favor ingresá la contraseña del Secretariado en el menú lateral para acceder.")
+    st.warning("👈 Por favor ingresá la contraseña del Secretariado en el menú lateral.")
