@@ -233,26 +233,28 @@ if admin_pass == "Secretaria2026":
                 st.error(f"Error al consultar solicitudes de modificación: {e}")
 
 # ---------------------------------------------------------
-    # MÓDULO 2: ASIGNACIÓN AUTOMÁTICA DE SORTEO CON VALIDACIÓN
+    # MÓDULO 2: ASIGNACIÓN RÁPIDA Y STRICTA DE PAÍSES
     # ---------------------------------------------------------
     elif menu == "2. Asignación Automática de Sorteo":
-        st.subheader(f"⚡ Asignación Directa por Matriz Predefinida - {modelo_seleccionado}")
-        
-        try:
-            res_del = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_modelo_actual}").json()
-            escuelas_aprobadas = res_del.get("data", [])
-            
-            res_paises = requests.get(f"{API_URL}?action=GET_PAISES_MATRIZ&id_modelo={id_modelo_actual}").json()
-            lista_paises = res_paises.get("data", [])
-            
-            res_org = requests.get(f"{API_URL}?action=GET_ORGANOS&id_modelo={id_modelo_actual}").json()
-            organos_matriz = res_org.get("data", [])
-        except Exception as e:
-            escuelas_aprobadas, lista_paises, organos_matriz = [], [], []
-            st.error(f"Error al consultar la matriz de países: {e}")
+        st.subheader(f"⚡ Asignación Directa y Validación de Cupos - {modelo_seleccionado}")
+
+        # Carga optimizada con Cache para evitar consultas HTTP repetidas
+        @st.cache_data(ttl=60)
+        def cargar_datos_sorteo(id_mod):
+            try:
+                r_del = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_mod}").json().get("data", [])
+                r_pai = requests.get(f"{API_URL}?action=GET_PAISES_MATRIZ&id_modelo={id_mod}").json().get("data", [])
+                r_org = requests.get(f"{API_URL}?action=GET_ORGANOS&id_modelo={id_mod}").json().get("data", [])
+                r_mod = requests.get(f"{API_URL}?action=GET_MODALIDADES_MODELO&id_modelo={id_mod}").json().get("data", [])
+                return r_del, r_pai, r_org, r_mod
+            except Exception:
+                return [], [], [], []
+
+        with st.spinner("Cargando matriz de sorteo..."):
+            escuelas_aprobadas, lista_paises, organos_matriz, modalidades_evento = cargar_datos_sorteo(id_modelo_actual)
 
         if not escuelas_aprobadas:
-            st.warning("No hay escuelas con pagos aprobados listos para el sorteo.")
+            st.warning("No hay escuelas con pagos aprobados disponibles para asignar.")
         elif not lista_paises:
             st.warning("⚠️ No se encontraron países en la solapa ORGANOS para este modelo.")
         else:
@@ -260,91 +262,113 @@ if admin_pass == "Secretaria2026":
             
             with col_a:
                 opciones_del = {f"{d['id_delegacion']} - {d['nombre_colegio']}": d for d in escuelas_aprobadas}
-                escuela_sel_label = st.selectbox("1. Seleccioná la Escuela que sorteó:", list(opciones_del.keys()))
+                escuela_sel_label = st.selectbox("1. Escuela que realizó el Sorteo:", list(opciones_del.keys()))
                 escuela_actual = opciones_del[escuela_sel_label]
             
             with col_b:
-                pais_seleccionado = st.selectbox("2. Seleccioná el País Sorteado:", sorted(lista_paises))
+                pais_seleccionado = st.selectbox("2. País a Asignar:", sorted(lista_paises))
 
             st.markdown("---")
             
-            # Datos de preinscripción de la escuela
-            cupos_permitidos = int(escuela_actual.get("cupos_solicitados", 0))
-            desglose_escuela = str(escuela_actual.get("desglose_modalidades", "")).lower()
+            # 1. Datos de la preinscripción de la escuela
+            cupos_autorizados = int(escuela_actual.get("cupos_solicitados", 0))
+            desglose_str = str(escuela_actual.get("desglose_modalidades", ""))
+            
+            # Extraer las modalidades solicitadas por la escuela en un diccionario -> {'del_5': 2, 'del_9': 1}
+            modalidades_escuela = {}
+            if desglose_str:
+                items = desglose_str.split("|")
+                for it in items:
+                    if ":" in it:
+                        k, v = it.split(":")
+                        modalidades_escuela[k.strip()] = int(v.strip()) if v.strip().isdigit() else 0
 
-            # Composición del país seleccionado
+            # 2. Requerimientos del País Seleccionado
             composicion_pais = [
                 o for o in organos_matriz 
                 if str(o.get('pais', '')).strip().lower() == str(pais_seleccionado).strip().lower()
             ]
             
-            st.markdown(f"#### 🔎 Verificación de Compatibilidad: **{pais_seleccionado}** vs **{escuela_actual['nombre_colegio']}**")
+            st.markdown(f"#### 🔎 Análisis de Viabilidad: **{pais_seleccionado}** ➔ **{escuela_actual['nombre_colegio']}**")
             
-            # Métricas rápidas de la escuela
             col_e1, col_e2 = st.columns(2)
             with col_e1:
-                st.info(f"📋 **Modalidades pedidas por la escuela:** {desglose_escuela or 'No especificado'}")
+                st.info(f"📋 **Modalidades pedidas:** `{desglose_str}`")
             with col_e2:
-                st.info(f"👥 **Cupos totales autorizados para la escuela:** {cupos_permitidos} delegados")
+                st.info(f"👥 **Cupos Totales Autorizados:** {cupos_autorizados} delegados")
 
+            # 3. RESTRICCIÓN DE COMPATIBILIDAD POR COMITÉ Y MODALIDAD
+            bloqueos_criticos = []
+            advertencias = []
             tot_cupos_pais = 0
-            alertas_compatibilidad = []
+
+            # Mapeo de modalidades válidas
+            tiene_cs = modalidades_escuela.get("del_9", 0) > 0 or modalidades_escuela.get("del_7_cs", 0) > 0
+            tiene_eco = modalidades_escuela.get("del_9", 0) > 0 or modalidades_escuela.get("del_7_eco", 0) > 0 or modalidades_escuela.get("del_7_eco_cs", 0) > 0
+            tiene_davos = modalidades_escuela.get("del_davos", 0) > 0
+            tiene_prensa = modalidades_escuela.get("del_prensa", 0) > 0
 
             if composicion_pais:
-                st.markdown("##### Composición de la representación:")
+                st.markdown("##### Comités requeridos por este país:")
                 for c in composicion_pais:
                     cupos = int(c.get('integrantes_totales', 1))
-                    organo_nombre = str(c.get('organo_comite', ''))
+                    organo_nombre = str(c.get('organo_comite', '')).strip()
+                    organo_lower = organo_nombre.lower()
                     tot_cupos_pais += cupos
                     
-                    # Validaciones de comités especiales (CS y ECOSOC)
-                    if "consejo de seguridad" in organo_nombre.lower() or "cs" in organo_nombre.lower():
-                        if "cs" not in desglose_escuela and "9d" not in desglose_escuela and "7d_cs" not in desglose_escuela:
-                            alertas_compatibilidad.append(f"⚠️ **{pais_seleccionado}** incluye **{organo_nombre}**, pero la escuela NO solicitó modalidad con Consejo de Seguridad.")
-                    
-                    if "ecosoc" in organo_nombre.lower():
-                        if "eco" not in desglose_escuela and "9d" not in desglose_escuela and "7d_eco" not in desglose_escuela:
-                            alertas_compatibilidad.append(f"⚠️ **{pais_seleccionado}** incluye **{organo_nombre}**, pero la escuela NO solicitó modalidad con ECOSOC.")
-
                     st.write(f"• **{organo_nombre}**: {cupos} delegado(s)")
 
-                # Mostrar alertas de ineligibilidad o advertencias
-                if alertas_compatibilidad:
-                    for al in alertas_compatibilidad:
-                        st.error(al)
+                    # VALIDACIONES ESTRICTAS DE RESTRICCIÓN
+                    if "consejo de seguridad" in organo_lower or "cs" in organo_lower:
+                        if not tiene_cs:
+                            bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere asiento en **{organo_nombre}**, pero el colegio NO contrató ninguna modalidad con Consejo de Seguridad (`del_9` o similar).")
+                    
+                    if "ecosoc" in organo_lower:
+                        if not tiene_eco:
+                            bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere asiento en **{organo_nombre}**, pero el colegio NO solicitó modalidad con ECOSOC.")
 
-                if tot_cupos_pais > cupos_permitidos:
-                    st.warning(f"⚠️ **Atención:** Este país requiere **{tot_cupos_pais} delegados**, pero la escuela solo tiene autorizados **{cupos_permitidos} cupos**.")
+                    if "davos" in organo_lower and not tiene_davos:
+                        bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} pertenece al **Foro de Davos**, y la escuela no preinscribió cupos para Davos (`del_davos`).")
 
+                    if "prensa" in organo_lower and not tiene_prensa:
+                        bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere **Comité de Prensa**, no solicitado por la escuela.")
+
+                # Verificación de exceso de cupos
+                if tot_cupos_pais > cupos_autorizados:
+                    bloqueos_criticos.append(f"⛔ **EXCESO DE CUPOS:** El país requiere **{tot_cupos_pais} integrantes**, pero el colegio solo dispone de **{cupos_autorizados} cupos**.")
+
+            # Muestra de Alertas y Bloqueos
+            if bloqueos_criticos:
+                for b in bloqueos_criticos:
+                    st.error(b)
             else:
-                st.caption("Seleccioná un país para ver su composición.")
+                st.success("✅ **Compatibilidad Verificada:** La escuela cuenta con la modalidad y los cupos necesarios para representar este país.")
 
-            # Botón de asignación con confirmación/bloqueo opcional
-            puedo_asignar = len(alertas_compatibilidad) == 0
+            # BOTÓN DE ASIGNACIÓN (DESHABILITADO SI HAY BLOQUEOS)
+            puedo_asignar = len(bloqueos_criticos) == 0
 
-            if st.button(f"🚀 ASIGNAR {pais_seleccionado.upper()} A {escuela_actual['nombre_colegio'].upper()}"):
-                if not puedo_asignar:
-                    st.error("❌ No se puede realizar la asignación debido a las incompatibilidades de comité señaladas arriba.")
-                else:
-                    payload = {
-                        "action": "ASIGNAR_PAIS_AUTOMATICO_DESDE_MATRIZ",
-                        "usuario": "ADMIN",
-                        "data": {
-                            "id_modelo": id_modelo_actual,
-                            "id_delegacion": escuela_actual['id_delegacion'],
-                            "pais": pais_seleccionado
-                        }
+            if st.button(f"🚀 ASIGNAR {pais_seleccionado.upper()}", disabled=not puedo_asignar):
+                payload = {
+                    "action": "ASIGNAR_PAIS_AUTOMATICO_DESDE_MATRIZ",
+                    "usuario": "ADMIN",
+                    "data": {
+                        "id_modelo": id_modelo_actual,
+                        "id_delegacion": escuela_actual['id_delegacion'],
+                        "pais": pais_seleccionado
                     }
-                    with st.spinner("Vinculando matriz automática..."):
-                        res = requests.post(API_URL, json=payload).json()
-                        if res.get("status") == "SUCCESS":
-                            st.balloons()
-                            st.success(f"🎉 ¡**{pais_seleccionado}** ({res.get('cupos_agregados')} cupos) fue asignado exitosamente!")
-                        else:
-                            st.error(f"Error: {res.get('message')}")
+                }
+                with st.spinner("Procesando asignación..."):
+                    res = requests.post(API_URL, json=payload).json()
+                    if res.get("status") == "SUCCESS":
+                        st.cache_data.clear() # Limpia la memoria para actualizar datos
+                        st.balloons()
+                        st.success(f"🎉 ¡**{pais_seleccionado}** ({res.get('cupos_agregados')} cupos) fue asignado a {escuela_actual['nombre_colegio']}!")
+                        st.rerun()
+                    else:
+                        st.error(f"Error del servidor: {res.get('message')}")
 
             st.markdown("---")
-            st.markdown("##### 📋 Países ya asignados a esta escuela:")
+            st.markdown("##### 📋 Asignaciones actuales de esta escuela:")
             res_asig_curr = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion={escuela_actual['id_delegacion']}").json()
             asig_list = res_asig_curr.get("data", [])
             if asig_list:
@@ -355,7 +379,7 @@ if admin_pass == "Secretaria2026":
                 for p_k, p_v in paises_resumen.items():
                     st.write(f"• **{p_k}**: {p_v} lugares asignados.")
             else:
-                st.caption("Aún no tiene países adjudicados.")
+                st.caption("Esta escuela aún no tiene países asignados.")
     # ---------------------------------------------------------
     # MÓDULO 3: SOLAPA DEDUCTIVA Y COMPLETA DE NÓMINA GENERAL
     # ---------------------------------------------------------
