@@ -9,10 +9,10 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbz0zBX3gXipKIXKAb5ZNHfQMy1YVYJrXVAf51IydmmDIdPM-VSMa91_HSmBdvsGL4Q4yw/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbzCVDquLKvY64UMPLtZ6brcuC_1817FHCSvyVbOBVCAGhBA9F0KFiP31OMNMUfwDOHJ7Q/exec"
 
 # =========================================================
-# FUNCIONES DE CACHÉ OPTIMIZADAS
+# FUNCIONES DE CACHÉ LIGERAS
 # =========================================================
 
 @st.cache_data(ttl=60)
@@ -26,22 +26,18 @@ def cargar_modelos_activos():
     except Exception:
         return {}
 
-@st.cache_data(ttl=15)
-def cargar_datos_sorteo(id_mod):
-    try:
-        r_del = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_mod}").json().get("data", [])
-        r_pai = requests.get(f"{API_URL}?action=GET_PAISES_MATRIZ&id_modelo={id_mod}").json().get("data", [])
-        r_org = requests.get(f"{API_URL}?action=GET_ORGANOS&id_modelo={id_mod}").json().get("data", [])
-        r_mod = requests.get(f"{API_URL}?action=GET_MODALIDADES_MODELO&id_modelo={id_mod}").json().get("data", [])
-        r_asig = requests.get(f"{API_URL}?action=GET_TODAS_ASIGNACIONES").json().get("data", [])
-        return r_del, r_pai, r_org, r_mod, r_asig
-    except Exception:
-        return [], [], [], [], []
-
 @st.cache_data(ttl=30)
 def cargar_todas_nominas_cached(id_mod):
     try:
         res = requests.get(f"{API_URL}?action=GET_TODAS_NOMINAS&id_modelo={id_mod}").json()
+        return res.get("data", [])
+    except Exception:
+        return []
+
+@st.cache_data(ttl=30)
+def cargar_escuelas_aprobadas_cached(id_mod):
+    try:
+        res = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_mod}").json()
         return res.get("data", [])
     except Exception:
         return []
@@ -75,9 +71,8 @@ if admin_pass == "Secretaria2026":
         [
             "📊 Dashboard & Estado del Modelo",
             "1. Revisión de Pagos y Modificaciones", 
-            "2. Asignación Automática de Sorteo",
-            "3. Nómina General de Participantes",
-            "4. Búsqueda Rápida por DNI"
+            "2. Nómina General de Participantes",
+            "3. Búsqueda Rápida por DNI"
         ]
     )
 
@@ -88,7 +83,7 @@ if admin_pass == "Secretaria2026":
         st.subheader(f"📈 Estado General del Evento - {modelo_seleccionado}")
         
         with st.spinner("Cargando métricas..."):
-            escuelas_aprobadas, _, organos_matriz, _, _ = cargar_datos_sorteo(id_modelo_actual)
+            escuelas_aprobadas = cargar_escuelas_aprobadas_cached(id_modelo_actual)
             todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
 
         m1, m2, m3, m4 = st.columns(4)
@@ -104,27 +99,7 @@ if admin_pass == "Secretaria2026":
             st.metric("📄 Fichas Médicas", fichas_ok)
 
         st.markdown("---")
-        st.markdown("### 🏛️ Matriz de Representación: Países y Cupos por Órgano / Comité")
-
-        if organos_matriz:
-            df_organos = pd.DataFrame(organos_matriz)
-            if "integrantes_totales" in df_organos.columns:
-                df_organos["integrantes_totales"] = pd.to_numeric(df_organos["integrantes_totales"], errors='coerce').fillna(1)
-                
-                resumen_organos = df_organos.groupby("organo_comite").agg(
-                    Cantidad_Paises=("pais", "nunique"),
-                    Total_Delegados=("integrantes_totales", "sum")
-                ).reset_index()
-
-                resumen_organos.columns = ["Órgano / Comité", "Paises Representados", "Cupos Totales"]
-
-                col_t1, col_t2 = st.columns([2, 1])
-                with col_t1:
-                    st.dataframe(resumen_organos, use_container_width=True, hide_index=True)
-                with col_t2:
-                    st.markdown("#### 📊 Resumen de Representaciones")
-                    for _, row in resumen_organos.iterrows():
-                        st.write(f"• **{row['Órgano / Comité']}**: {row['Paises Representados']} países ({int(row['Cupos Totales'])} lugares)")
+        st.info("ℹ️ Para asignar países a los colegios preinscriptos, cargá las representaciones directamente en la solapa **`ASIGNACIONES`** de tu Google Sheets. El portal docente las reconocerá inmediatamente.")
 
     # ---------------------------------------------------------
     # MÓDULO 1: REVISIÓN DE PAGOS Y MODIFICACIONES
@@ -171,7 +146,7 @@ if admin_pass == "Secretaria2026":
                 else:
                     for esc in pendientes_filtrados:
                         with st.expander(f"🏫 {esc.get('nombre_colegio')} ({esc.get('id_delegacion')})"):
-                            st.write(f"**Contacto:** {esc.get('docente_cargo')} ({esc.get('email_contacto')})")
+                            st.write(f"**Contacto:** {esc.get('docente_cargo')} ({esc.get('email_contacto')}) | Teléfono: {esc.get('telefono_contacto')}")
                             propuesta_raw = esc.get("propuesta_modificacion", "{}")
                             try:
                                 prop = json.loads(propuesta_raw)
@@ -183,7 +158,7 @@ if admin_pass == "Secretaria2026":
                             docentes_acomp = prop.get("docentes_acompanantes", esc.get("docentes_acompanantes"))
 
                             st.write(f"• **Nuevos Cupos Estudiantes:** {nuevos_cupos}")
-                            st.write(f"• **Nuevos Docentes:** {docentes_acomp}")
+                            st.write(f"• **Nuevos Docentes Acompañantes:** {docentes_acomp}")
                             st.write(f"• **Desglose:** {nuevo_desglose}")
                             
                             col_m1, col_m2 = st.columns(2)
@@ -195,180 +170,22 @@ if admin_pass == "Secretaria2026":
                                         st.cache_data.clear()
                                         st.success("Aprobado")
                                         st.rerun()
+
+                            with col_m2:
+                                if st.button("❌ RECHAZAR CAMBIO", key=f"rej_mod_{esc.get('id_delegacion')}"):
+                                    payload = {"action": "RESPONDER_MODIFICACION_PREINSCRIPCION", "usuario": "ADMIN", "data": {"id_delegacion": esc.get('id_delegacion'), "aprobar": False}}
+                                    r = requests.post(API_URL, json=payload).json()
+                                    if r.get("status") == "SUCCESS":
+                                        st.cache_data.clear()
+                                        st.info("Rechazado")
+                                        st.rerun()
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# ---------------------------------------------------------
-    # MÓDULO 2: ASIGNACIÓN CON RECALCULO DE CUPOS REALES
     # ---------------------------------------------------------
-    elif menu == "2. Asignación Automática de Sorteo":
-        st.subheader(f"⚡ Asignación Directa y Validación de Cupos - {modelo_seleccionado}")
-
-        with st.spinner("Sincronizando matriz y asignaciones..."):
-            escuelas_aprobadas, lista_paises, organos_matriz, modalidades_evento, _ = cargar_datos_sorteo(id_modelo_actual)
-
-        if not escuelas_aprobadas:
-            st.warning("No hay escuelas con pagos aprobados disponibles.")
-        elif not lista_paises:
-            st.warning("⚠️ No hay países configurados en la solapa ORGANOS.")
-        else:
-            col_a, col_b = st.columns(2)
-            
-            with col_a:
-                opciones_del = {f"{d.get('id_delegacion', 'DEL')} - {d.get('nombre_colegio', 'Escuela')}": d for d in escuelas_aprobadas if d.get('id_delegacion')}
-                escuela_sel_label = st.selectbox("1. Escuela que realizó el Sorteo:", list(opciones_del.keys()))
-                escuela_actual = opciones_del[escuela_sel_label]
-                id_del_actual = str(escuela_actual.get('id_delegacion')).strip()
-
-            # Consultas en tiempo real
-            try:
-                res_asig_escuela = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion={id_del_actual}").json().get("data", [])
-                res_todas_asig = requests.get(f"{API_URL}?action=GET_TODAS_ASIGNACIONES").json().get("data", [])
-            except Exception:
-                res_asig_escuela, res_todas_asig = [], []
-
-            # 1. PARSEO DEL DESGLOSE DE MODALIDADES
-            desglose_str = str(escuela_actual.get("desglose_modalidades", ""))
-            modalidades_escuela = {}
-            if desglose_str:
-                items = desglose_str.split("|")
-                for it in items:
-                    if ":" in it:
-                        k, v = it.split(":")
-                        cant = int(v.strip()) if v.strip().isdigit() else 0
-                        if cant > 0:
-                            modalidades_escuela[k.strip().lower()] = cant
-
-            # 2. MAPEO DINÁMICO DE INTEGRANTES POR MODALIDAD DESDE SHEETS
-            dict_modalidades_config = {
-                str(m.get("clave_modalidad", "")).strip().lower(): int(m.get("delegados_por_unidad", 1))
-                for m in modalidades_evento if str(m.get("delegados_por_unidad", "1")).isdigit()
-            }
-
-            # Fallback por si la solapa MODALIDADES_MODELO aún no está sincronizada
-            mapa_fallback = {
-                "del_5": 5,
-                "del_7_eco": 7,
-                "del_9_cs": 9,
-                "del_9": 9,
-                "del_7_seco_cs": 7,
-                "del_davos": 1,
-                "del_prensa": 3
-            }
-
-            # RECALCULO DE CUPOS TOTALES REALES
-            cupos_totales_contratados = 0
-            for k, cant_unidades in modalidades_escuela.items():
-                mult = dict_modalidades_config.get(k, mapa_fallback.get(k, 1))
-                cupos_totales_contratados += cant_unidades * mult
-
-            # Si el desglose viene vacío, usar el valor registrado en Sheets
-            if cupos_totales_contratados == 0:
-                cupos_totales_contratados = int(escuela_actual.get("cupos_solicitados", 0)) if str(escuela_actual.get("cupos_solicitados", "0")).isdigit() else 0
-
-            # CALCULO DE CUPOS USADOS Y LIBRES
-            cupos_ya_usados = len(res_asig_escuela)
-            cupos_restantes = max(0, cupos_totales_contratados - cupos_ya_usados)
-
-            # FILTRAR PAÍSES YA ASIGNADOS EN EL EVENTO
-            paises_ya_asignados_global = set([str(a.get("pais")).strip().lower() for a in res_todas_asig if a.get("pais")])
-            lista_paises_disponibles = [p for p in lista_paises if str(p).strip().lower() not in paises_ya_asignados_global]
-
-            with col_b:
-                if not lista_paises_disponibles:
-                    st.warning("⚠️ Todos los países de la matriz ya fueron adjudicados.")
-                    pais_seleccionado = None
-                else:
-                    pais_seleccionado = st.selectbox("2. País Disponible a Asignar:", sorted(lista_paises_disponibles))
-
-            st.markdown("---")
-            st.markdown(f"#### 🔎 Estado de Asignación: **{escuela_actual.get('nombre_colegio')}**")
-            
-            col_e1, col_e2, col_e3 = st.columns(3)
-            with col_e1:
-                st.info(f"👥 **Cupos Totales Reales:** {cupos_totales_contratados} delegados")
-            with col_e2:
-                st.warning(f"📌 **Cupos Ya Asignados:** {cupos_ya_usados} lugares")
-            with col_e3:
-                if cupos_restantes > 0:
-                    st.success(f"🟢 **Cupos Libres Restantes:** {cupos_restantes} lugares")
-                else:
-                    st.error("🔴 **Cupos Agotados:** Escuela con asignaciones completadas.")
-
-            # DETALLE DEL DESGLOSE DE MODALIDADES
-            st.caption(f"📄 **Desglose contratado:** `{desglose_str}`")
-
-            escuela_tiene_cs = any("cs" in k or "9" in k or "con cs" in k for k in modalidades_escuela.keys())
-            escuela_tiene_eco = any("eco" in k or "ecosoc" in k for k in modalidades_escuela.keys())
-
-            if pais_seleccionado and cupos_restantes > 0:
-                composicion_pais = [o for o in organos_matriz if str(o.get('pais', '')).strip().lower() == str(pais_seleccionado).strip().lower()]
-                
-                bloqueos_criticos = []
-                tot_cupos_pais = 0
-
-                st.markdown(f"##### Comités requeridos por **{pais_seleccionado}**:")
-                for c in composicion_pais:
-                    cupos = int(c.get('integrantes_totales', 1)) if str(c.get('integrantes_totales', '1')).isdigit() else 1
-                    organo_nombre = str(c.get('organo_comite', '')).strip()
-                    organo_lower = organo_nombre.lower()
-                    tot_cupos_pais += cupos
-                    
-                    st.write(f"• **{organo_nombre}**: {cupos} delegado(s)")
-
-                    if ("consejo de seguridad" in organo_lower or "cs" in organo_lower) and "ecosoc" not in organo_lower:
-                        if not escuela_tiene_cs:
-                            bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere asiento en **{organo_nombre}**, pero la escuela no solicitó modalidad con CS.")
-                    
-                    if "ecosoc" in organo_lower and not escuela_tiene_eco:
-                        bloqueos_criticos.append(f"⛔ **RESTRICCIÓN:** {pais_seleccionado} requiere asiento en **{organo_nombre}**, pero la escuela no solicitó ECOSOC.")
-
-                if tot_cupos_pais > cupos_restantes:
-                    bloqueos_criticos.append(f"⛔ **EXCESO DE CUPOS:** El país requiere **{tot_cupos_pais} lugares**, pero la escuela solo dispone de **{cupos_restantes} cupos libres**.")
-
-                if bloqueos_criticos:
-                    for b in bloqueos_criticos:
-                        st.error(b)
-                else:
-                    st.success(f"✅ **Compatibilidad Verificada:** Este país ocupa {tot_cupos_pais} lugares y te quedan {cupos_restantes} disponibles.")
-
-                puedo_asignar = len(bloqueos_criticos) == 0
-
-                if st.button(f"🚀 ASIGNAR {str(pais_seleccionado).upper()}", disabled=not puedo_asignar):
-                    payload = {
-                        "action": "ASIGNAR_PAIS_AUTOMATICO_DESDE_MATRIZ",
-                        "usuario": "ADMIN",
-                        "data": {
-                            "id_modelo": id_modelo_actual,
-                            "id_delegacion": id_del_actual,
-                            "pais": pais_seleccionado
-                        }
-                    }
-                    with st.spinner(f"Asignando {pais_seleccionado}..."):
-                        res = requests.post(API_URL, json=payload).json()
-                        if res.get("status") == "SUCCESS":
-                            st.cache_data.clear()
-                            st.balloons()
-                            st.success(f"🎉 ¡**{pais_seleccionado}** ({res.get('cupos_agregados')} cupos) fue asignado exitosamente!")
-                            st.rerun()
-                        else:
-                            st.error(f"Error del servidor: {res.get('message')}")
-
-            st.markdown("---")
-            st.markdown("##### 📋 Países ya adjudicados a esta escuela:")
-            if res_asig_escuela:
-                paises_resumen = {}
-                for a in res_asig_escuela:
-                    p = a.get('pais')
-                    paises_resumen[p] = paises_resumen.get(p, 0) + 1
-                for p_k, p_v in paises_resumen.items():
-                    st.write(f"• **{p_k}**: {p_v} lugares asignados.")
-            else:
-                st.caption("Esta escuela aún no tiene ningún país asignado.")
+    # MÓDULO 2: NÓMINA GENERAL
     # ---------------------------------------------------------
-    # MÓDULO 3 Y 4: NÓMINA Y BÚSQUEDA
-    # ---------------------------------------------------------
-    elif menu == "3. Nómina General de Participantes":
+    elif menu == "2. Nómina General de Participantes":
         st.subheader(f"📋 Nómina Consolidada de Participantes - {modelo_seleccionado}")
         todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
 
@@ -412,7 +229,10 @@ if admin_pass == "Secretaria2026":
 
             st.dataframe(pd.DataFrame(lista_procesada), use_container_width=True, hide_index=True)
 
-    elif menu == "4. Búsqueda Rápida por DNI":
+    # ---------------------------------------------------------
+    # MÓDULO 3: BÚSQUEDA RÁPIDA
+    # ---------------------------------------------------------
+    elif menu == "3. Búsqueda Rápida por DNI":
         st.subheader(f"🔍 Buscador Global de Participantes - {modelo_seleccionado}")
         busqueda = st.text_input("Ingresá DNI, Nombre, Apellido o ID Delegación:")
         
