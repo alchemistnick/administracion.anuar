@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import json
+import pandas as pd
 
 st.set_page_config(
     page_title="Secretariado - Control Interno MNU",
@@ -10,9 +11,9 @@ st.set_page_config(
 
 API_URL = "https://script.google.com/macros/s/AKfycbzCVDquLKvY64UMPLtZ6brcuC_1817FHCSvyVbOBVCAGhBA9F0KFiP31OMNMUfwDOHJ7Q/exec"
 
-st.title("🛡️ Panel Interno del Secretariado - Control y Sorteo")
+st.title("🛡️ Panel Interno del Secretariado - Control y Gestión Global")
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def cargar_modelos_activos():
     try:
         res = requests.get(f"{API_URL}?action=GET_MODELOS_ACTIVOS").json()
@@ -44,17 +45,78 @@ if admin_pass == "Secretaria2026":
     menu = st.sidebar.radio(
         "Módulos de Gestión",
         [
+            "📊 Dashboard & Estado del Modelo",
             "1. Revisión de Pagos y Modificaciones", 
             "2. Asignación Automática de Sorteo",
-            "3. Auditoría de Nóminas y Fichas",
-            "4. Búsqueda por DNI / Alumno"
+            "3. Nómina General de Participantes",
+            "4. Búsqueda Rápida por DNI"
         ]
     )
 
     # ---------------------------------------------------------
+    # MÓDULO 0: DASHBOARD Y CUADRO DE MÉTRICAS DEL EVENTO
+    # ---------------------------------------------------------
+    if menu == "📊 Dashboard & Estado del Modelo":
+        st.subheader(f"📈 Estado General del Evento - {modelo_seleccionado}")
+        
+        with st.spinner("Cargando métricas en tiempo real..."):
+            try:
+                res_del = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_modelo_actual}").json()
+                escuelas_aprobadas = res_del.get("data", [])
+                
+                res_nom = requests.get(f"{API_URL}?action=GET_TODAS_NOMINAS&id_modelo={id_modelo_actual}").json()
+                todas_nominas = res_nom.get("data", [])
+                
+                res_org = requests.get(f"{API_URL}?action=GET_ORGANOS&id_modelo={id_modelo_actual}").json()
+                organos_matriz = res_org.get("data", [])
+            except Exception as e:
+                escuelas_aprobadas, todas_nominas, organos_matriz = [], [], []
+                st.error(f"Error al sincronizar datos: {e}")
+
+        # METRICAS PRINCIPALES (TARJETAS GIGANTES)
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.metric("🏫 Escuelas Preinscriptas Aprobadas", len(escuelas_aprobadas))
+        with m2:
+            tot_cupos = sum([int(e.get("cupos_solicitados", 0)) for e in escuelas_aprobadas])
+            st.metric("👥 Cupos Estudiantiles Aprobados", tot_cupos)
+        with m3:
+            st.metric("👤 Participantes Cargados", len(todas_nominas))
+        with m4:
+            fichas_ok = sum([1 for n in todas_nominas if n.get("drive_ficha_id") and n.get("drive_ficha_id") != "-"])
+            st.metric("📄 Fichas Médicas Recibidas", fichas_ok)
+
+        st.markdown("---")
+        st.markdown("### 🏛️ Matriz de Representación: Países y Cupos por Órgano / Comité")
+
+        if not organos_matriz:
+            st.info("No hay información de la matriz de órganos cargada en la pestaña ORGANOS para este modelo.")
+        else:
+            df_organos = pd.DataFrame(organos_matriz)
+            
+            # Limpieza y conversión numérica
+            df_organos["integrantes_totales"] = pd.to_numeric(df_organos["integrantes_totales"], errors='coerce').fillna(1)
+            
+            # Agrupación de países e integrantes por Órgano / Comité
+            resumen_organos = df_organos.groupby("organo_comite").agg(
+                Cantidad_Paises=("pais", "nunique"),
+                Total_Delegados=("integrantes_totales", "sum")
+            ).reset_index()
+
+            resumen_organos.columns = ["Órgano / Comité", "Paises Representados", "Cupos / Delegados Totales"]
+
+            col_t1, col_t2 = st.columns([2, 1])
+            with col_t1:
+                st.dataframe(resumen_organos, use_container_width=True, hide_index=True)
+            with col_t2:
+                st.markdown("#### 📊 Distribución de Cupos")
+                for _, row in resumen_organos.iterrows():
+                    st.write(f"• **{row['Órgano / Comité']}**: {row['Paises Representados']} países ({int(row['Cupos / Delegados Totales'])} delegados)")
+
+    # ---------------------------------------------------------
     # MÓDULO 1: REVISIÓN DE PAGOS Y MODIFICACIONES
     # ---------------------------------------------------------
-    if menu == "1. Revisión de Pagos y Modificaciones":
+    elif menu == "1. Revisión de Pagos y Modificaciones":
         st.subheader(f"Auditoría General - {modelo_seleccionado}")
         
         tab_pagos, tab_modificaciones = st.tabs(["💳 Comprobantes de Pago", "✏️ Solicitudes de Cambio de Cupos"])
@@ -186,9 +248,7 @@ if admin_pass == "Secretaria2026":
             res_org = requests.get(f"{API_URL}?action=GET_ORGANOS&id_modelo={id_modelo_actual}").json()
             organos_matriz = res_org.get("data", [])
         except Exception as e:
-            escuelas_aprobadas = []
-            lista_paises = []
-            organos_matriz = []
+            escuelas_aprobadas, lista_paises, organos_matriz = [], [], []
             st.error(f"Error al consultar la matriz de países: {e}")
 
         if not escuelas_aprobadas:
@@ -258,10 +318,10 @@ if admin_pass == "Secretaria2026":
                 st.caption("Aún no tiene países adjudicados.")
 
     # ---------------------------------------------------------
-    # MÓDULO 3: AUDITORÍA DE NÓMINAS Y FICHAS
+    # MÓDULO 3: SOLAPA DEDUCTIVA Y COMPLETA DE NÓMINA GENERAL
     # ---------------------------------------------------------
-    elif menu == "3. Auditoría de Nóminas y Fichas":
-        st.subheader(f"Revision General de Nóminas Cargadas - {modelo_seleccionado}")
+    elif menu == "3. Nómina General de Participantes":
+        st.subheader(f"📋 Nómina Consolidada de Participantes - {modelo_seleccionado}")
         
         try:
             res_nom = requests.get(f"{API_URL}?action=GET_TODAS_NOMINAS&id_modelo={id_modelo_actual}").json()
@@ -273,28 +333,52 @@ if admin_pass == "Secretaria2026":
         if not todas_nominas:
             st.info("Aún no hay participantes cargados en la base de datos para este modelo.")
         else:
-            st.success(f"Total de participantes registrados: **{len(todas_nominas)}**")
-            
-            tabla_resumen = []
+            col_f1, col_f2 = st.columns([2, 1])
+            with col_f1:
+                filtro_busqueda = st.text_input("🔍 Filtrar por Nombre, Apellido, DNI o Escuela:")
+            with col_f2:
+                filtro_doc = st.selectbox("Filtrar por Estado de Documentación:", ["Todos", "Ficha Médica Pendiente", "Autorización Pendiente", "Documentación Completa"])
+
+            # Procesar datos para la tabla consolidada
+            lista_procesada = []
             for n in todas_nominas:
-                nombre_comp = f"{n.get('nombre', '')} {n.get('apellido', '')}".strip() or n.get("nombre_completo", "")
-                tabla_resumen.append({
+                ficha_ok = n.get("drive_ficha_id") and n.get("drive_ficha_id") != "-"
+                aut_ok = n.get("drive_autorizacion_id") and n.get("drive_autorizacion_id") != "-"
+                
+                # Filtro por documentación
+                if filtro_doc == "Ficha Médica Pendiente" and ficha_ok:
+                    continue
+                if filtro_doc == "Autorización Pendiente" and aut_ok:
+                    continue
+                if filtro_doc == "Documentación Completa" and (not ficha_ok or not aut_ok):
+                    continue
+
+                # Filtro por búsqueda de texto
+                nom_comp = f"{n.get('nombre', '')} {n.get('apellido', '')}".strip() or n.get("nombre_completo", "")
+                query = filtro_busqueda.strip().lower()
+                if query:
+                    if not (query in nom_comp.lower() or query in str(n.get("dni", "")).lower() or query in str(n.get("id_delegacion", "")).lower()):
+                        continue
+
+                lista_procesada.append({
                     "ID Delegado": n.get("id_delegado"),
-                    "Escuela/ID": n.get("id_delegacion"),
-                    "Nombre Completo": nombre_comp,
+                    "Escuela / ID": n.get("id_delegacion"),
+                    "Nombre": n.get("nombre", "-"),
+                    "Apellido": n.get("apellido", "-"),
                     "DNI": n.get("dni"),
                     "Rol / Representación": n.get("rol_mnu"),
-                    "Ficha ID": "✅ Cargada" if n.get("drive_ficha_id") != "-" else "❌ Pendiente",
-                    "Autorización ID": "✅ Cargada" if n.get("drive_autorizacion_id") != "-" else "❌ Pendiente",
-                    "Alergias / Cuidados": n.get("alergias_medicas")
+                    "Ficha Médica": "✅ OK" if ficha_ok else "❌ Pendiente",
+                    "Autorización Imagen": "✅ OK" if aut_ok else "❌ Pendiente",
+                    "Alergias / Cuidados Médicos": n.get("alergias_medicas", "Ninguna")
                 })
-            
-            st.dataframe(tabla_resumen, use_container_width=True)
+
+            st.markdown(f"**Mostrando {len(lista_procesada)} de {len(todas_nominas)} participantes.**")
+            st.dataframe(pd.DataFrame(lista_procesada), use_container_width=True, hide_index=True)
 
     # ---------------------------------------------------------
-    # MÓDULO 4: BÚSQUEDA POR DNI / ALUMNO
+    # MÓDULO 4: BÚSQUEDA RÁPIDA POR DNI / ALUMNO
     # ---------------------------------------------------------
-    elif menu == "4. Búsqueda por DNI / Alumno":
+    elif menu == "4. Búsqueda Rápida por DNI":
         st.subheader(f"🔍 Buscador Global de Participantes - {modelo_seleccionado}")
         
         busqueda = st.text_input("Ingresá el DNI, Nombre, Apellido o Código de Delegación (Ej: DEL-001):")
