@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import re
 
 st.set_page_config(
     page_title="Secretariado - Control Interno MNU",
@@ -7,7 +8,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbwm4txmgLGsDQTbm_TddfzlX_mc94FK-YEOFyM5m1Xg26Ox71dgJzQ-yKOSk47-t8gqMQ/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbwZim4YeUITbiOhsKpbKQPSrVqH-IwhoSTLZ5G_u1PhAQ2Z72VzqAL_OZb6nBvOjXC-mA/exec"
 
 st.title("🛡️ Panel Interno del Secretariado - Control y Sorteo")
 
@@ -43,7 +44,7 @@ if admin_pass == "Secretaria2026":
     menu = st.sidebar.radio(
         "Módulos de Gestión",
         [
-            "1. Revisión de Pagos", 
+            "1. Revisión de Pagos y Modificaciones", 
             "2. Asignación Automática de Sorteo",
             "3. Auditoría de Nóminas y Fichas",
             "4. Búsqueda por DNI / Alumno"
@@ -51,57 +52,113 @@ if admin_pass == "Secretaria2026":
     )
 
     # ---------------------------------------------------------
-    # MÓDULO 1: REVISIÓN DE PAGOS
+    # MÓDULO 1: REVISIÓN DE PAGOS Y MODIFICACIONES
     # ---------------------------------------------------------
-    if menu == "1. Revisión de Pagos":
-        st.subheader(f"Gestión y Auditoría de Pagos - {modelo_seleccionado}")
+    if menu == "1. Revisión de Pagos y Modificaciones":
+        st.subheader(f"Auditoría General - {modelo_seleccionado}")
         
-        if st.button("🔄 Actualizar Lista de Pagos"):
-            st.rerun()
-            
-        try:
-            res = requests.get(f"{API_URL}?action=GET_PAGOS_PENDIENTES").json()
-            pagos = res.get("data", [])
-            
-            pagos_filtrados = [p for p in pagos if p.get("id_modelo") == id_modelo_actual or not p.get("id_modelo")]
-            
-            if not pagos_filtrados:
-                st.success(f"No hay comprobantes pendientes de revisión para {modelo_seleccionado}.")
-            else:
-                st.info(f"Se encontraron **{len(pagos_filtrados)}** comprobantes pendientes de acreditación.")
+        tab_pagos, tab_modificaciones = st.tabs(["💳 Comprobantes de Pago", "✏️ Solicitudes de Cambio de Cupos"])
+        
+        # TAB 1: PAGOS PENDIENTES
+        with tab_pagos:
+            try:
+                res = requests.get(f"{API_URL}?action=GET_PAGOS_PENDIENTES").json()
+                pagos = res.get("data", [])
+                pagos_filtrados = [p for p in pagos if p.get("id_modelo") == id_modelo_actual or not p.get("id_modelo")]
                 
-                for pago in pagos_filtrados:
-                    with st.expander(f"💳 Pago {pago['id_pago']} | Delegación: {pago['id_delegacion']} | Monto: ${pago['monto']}"):
-                        col_a, col_b = st.columns([2, 1])
-                        with col_a:
-                            st.write(f"**Fecha de Subida:** {pago['fecha_subida']}")
-                            if pago.get('drive_file_url') and pago['drive_file_url'] != "-":
-                                st.markdown(f"[📄 **Ver Comprobante Adjunto en Drive**]({pago['drive_file_url']})", unsafe_allow_html=True)
-                        
-                        with col_b:
-                            if st.button("✅ APROBAR PAGO", key=f"app_{pago['id_pago']}"):
-                                payload = {
-                                    "action": "CAMBIAR_ESTADO_PAGO",
-                                    "usuario": "ADMIN",
-                                    "data": {"id_pago": pago['id_pago'], "nuevo_estado": "APROBADO"}
-                                }
-                                r = requests.post(API_URL, json=payload).json()
-                                if r.get("status") == "SUCCESS":
-                                    st.success("Pago Aprobado con Éxito")
-                                    st.rerun()
+                if not pagos_filtrados:
+                    st.success(f"No hay comprobantes pendientes de revisión para {modelo_seleccionado}.")
+                else:
+                    st.info(f"Se encontraron **{len(pagos_filtrados)}** comprobantes pendientes de acreditación.")
+                    for pago in pagos_filtrados:
+                        with st.expander(f"💳 Pago {pago['id_pago']} | Delegación: {pago['id_delegacion']} | Monto: ${pago['monto']}"):
+                            col_a, col_b = st.columns([2, 1])
+                            with col_a:
+                                st.write(f"**Fecha de Subida:** {pago['fecha_subida']}")
+                                if pago.get('drive_file_url') and pago['drive_file_url'] != "-":
+                                    st.markdown(f"[📄 **Ver Comprobante Adjunto en Drive**]({pago['drive_file_url']})", unsafe_allow_html=True)
+                            
+                            with col_b:
+                                if st.button("✅ APROBAR PAGO", key=f"app_{pago['id_pago']}"):
+                                    payload = {
+                                        "action": "CAMBIAR_ESTADO_PAGO",
+                                        "usuario": "ADMIN",
+                                        "data": {"id_pago": pago['id_pago'], "nuevo_estado": "APROBADO"}
+                                    }
+                                    r = requests.post(API_URL, json=payload).json()
+                                    if r.get("status") == "SUCCESS":
+                                        st.success("Pago Aprobado con Éxito")
+                                        st.rerun()
 
-                            if st.button("❌ RECHAZAR PAGO", key=f"rej_{pago['id_pago']}"):
-                                payload = {
-                                    "action": "CAMBIAR_ESTADO_PAGO",
-                                    "usuario": "ADMIN",
-                                    "data": {"id_pago": pago['id_pago'], "nuevo_estado": "RECHAZADO"}
-                                }
-                                r = requests.post(API_URL, json=payload).json()
-                                if r.get("status") == "SUCCESS":
-                                    st.warning("Pago Rechazado")
-                                    st.rerun()
-        except Exception as e:
-            st.error(f"Error al conectar con la base de datos: {e}")
+                                if st.button("❌ RECHAZAR PAGO", key=f"rej_{pago['id_pago']}"):
+                                    payload = {
+                                        "action": "CAMBIAR_ESTADO_PAGO",
+                                        "usuario": "ADMIN",
+                                        "data": {"id_pago": pago['id_pago'], "nuevo_estado": "RECHAZADO"}
+                                    }
+                                    r = requests.post(API_URL, json=payload).json()
+                                    if r.get("status") == "SUCCESS":
+                                        st.warning("Pago Rechazado")
+                                        st.rerun()
+            except Exception as e:
+                st.error(f"Error al conectar con la base de datos: {e}")
+
+        # TAB 2: VALIDACIÓN DE MODIFICACIONES DE PREINSCRIPCIÓN
+        with tab_modificaciones:
+            try:
+                res_mod = requests.get(f"{API_URL}?action=GET_MODIFICACIONES_PENDIENTES").json()
+                pendientes_mod = res_mod.get("data", [])
+                
+                pendientes_filtrados = [d for d in pendientes_mod if d.get("id_modelo") == id_modelo_actual or not d.get("id_modelo")]
+                
+                if not pendientes_filtrados:
+                    st.success("No hay solicitudes de modificación de cupos pendientes.")
+                else:
+                    st.warning(f"Hay **{len(pendientes_filtrados)}** solicitudes de cambio en espera de validación:")
+                    
+                    for esc in pendientes_filtrados:
+                        with st.expander(f"🏫 {esc.get('nombre_colegio')} ({esc.get('id_delegacion')}) - Solicitud de Cambio"):
+                            st.write(f"**Docente a cargo:** {esc.get('docente_cargo')} ({esc.get('email_contacto')})")
+                            st.write(f"**Detalle Solicitado:** {esc.get('desglose_modalidades')}")
+                            
+                            # Extraer automáticamente la propuesta de nuevos cupos
+                            match_cupos = re.search(r'Cupos:\s*(\d+)', str(esc.get('desglose_modalidades')))
+                            nuevos_cupos = int(match_cupos.group(1)) if match_cupos else int(esc.get('cupos_solicitados', 0))
+                            
+                            col_m1, col_m2 = st.columns(2)
+                            with col_m1:
+                                if st.button("✅ APROBAR MODIFICACIÓN", key=f"app_mod_{esc['id_delegacion']}"):
+                                    payload = {
+                                        "action": "RESPONDER_MODIFICACION_PREINSCRIPCION",
+                                        "usuario": "ADMIN",
+                                        "data": {
+                                            "id_delegacion": esc['id_delegacion'],
+                                            "aprobar": True,
+                                            "nuevos_cupos": nuevos_cupos,
+                                            "nuevo_desglose": esc.get('desglose_modalidades')
+                                        }
+                                    }
+                                    r = requests.post(API_URL, json=payload).json()
+                                    if r.get("status") == "SUCCESS":
+                                        st.success("Modificación Aprobada y actualizada en la base de datos.")
+                                        st.rerun()
+
+                            with col_m2:
+                                if st.button("❌ RECHAZAR CAMBIO", key=f"rej_mod_{esc['id_delegacion']}"):
+                                    payload = {
+                                        "action": "RESPONDER_MODIFICACION_PREINSCRIPCION",
+                                        "usuario": "ADMIN",
+                                        "data": {
+                                            "id_delegacion": esc['id_delegacion'],
+                                            "aprobar": False
+                                        }
+                                    }
+                                    r = requests.post(API_URL, json=payload).json()
+                                    if r.get("status") == "SUCCESS":
+                                        st.info("Modificación Rechazada. Se mantiene la inscripción anterior.")
+                                        st.rerun()
+            except Exception as e:
+                st.error(f"Error al consultar solicitudes de modificación: {e}")
 
     # ---------------------------------------------------------
     # MÓDULO 2: ASIGNACIÓN AUTOMÁTICA DESDE MATRIZ DE PAÍSES
