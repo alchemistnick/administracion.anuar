@@ -9,7 +9,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbzCVDquLKvY64UMPLtZ6brcuC_1817FHCSvyVbOBVCAGhBA9F0KFiP31OMNMUfwDOHJ7Q/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbzyH8LsgDbpjdq_9JSNBRFO81rTEulyaFDrzeEtzp87GNvW-J8if5s0S837haXIDXJkuw/exec"
 
 @st.cache_data(ttl=60)
 def cargar_modelos_activos():
