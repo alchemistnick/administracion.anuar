@@ -9,7 +9,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbzyH8LsgDbpjdq_9JSNBRFO81rTEulyaFDrzeEtzp87GNvW-J8if5s0S837haXIDXJkuw/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbz-_CGcnnLW3nsh-EQPZ4CkLzTZvkuK1tLTAXw1D49MpynEqbigCqwEMoGyL5ft8ZTqlA/exec"
 
 @st.cache_data(ttl=60)
 def cargar_modelos_activos():
@@ -91,7 +91,7 @@ if admin_pass == "Secretaria2026":
             st.metric("📄 Fichas Médicas Recibidas", fichas_ok)
 
         st.markdown("---")
-        st.info("ℹ️ Para generar y poblar las bancas automáticamente, completá las pestañas **`CS`**, **`AG`**, **`FORO DE DAVOS`** y **`COMITE DE PRENSA`** en tu Google Sheet y ejecutá la función `generarMatrizYAsignacionesAutomatica()` en Google Apps Script.")
+        st.info("ℹ️ Para cargar los resultados del sorteo, completá la solapa **`ASIGNACIONES_EXCEL`** en tu Google Sheet (Columna A: Colegio, Columna B: País) y ejecutá la función `importarAsignacionesDesdeExcel()` en Google Apps Script.")
 
     # ---------------------------------------------------------
     # MÓDULO 1: REVISIÓN DE PAGOS Y MODIFICACIONES
