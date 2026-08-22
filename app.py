@@ -11,10 +11,6 @@ st.set_page_config(
 
 API_URL = "https://script.google.com/macros/s/AKfycbzCVDquLKvY64UMPLtZ6brcuC_1817FHCSvyVbOBVCAGhBA9F0KFiP31OMNMUfwDOHJ7Q/exec"
 
-# =========================================================
-# FUNCIONES DE CACHÉ LIGERAS
-# =========================================================
-
 @st.cache_data(ttl=60)
 def cargar_modelos_activos():
     try:
@@ -41,10 +37,6 @@ def cargar_escuelas_aprobadas_cached(id_mod):
         return res.get("data", [])
     except Exception:
         return []
-
-# =========================================================
-# INICIALIZACIÓN DE LA APP
-# =========================================================
 
 st.title("🛡️ Panel Interno del Secretariado - Control y Gestión Global")
 
@@ -96,10 +88,10 @@ if admin_pass == "Secretaria2026":
             st.metric("👤 Participantes Cargados", len(todas_nominas))
         with m4:
             fichas_ok = sum([1 for n in todas_nominas if n.get("drive_ficha_id") and str(n.get("drive_ficha_id")).strip() != "-"])
-            st.metric("📄 Fichas Médicas", fichas_ok)
+            st.metric("📄 Fichas Médicas Recibidas", fichas_ok)
 
         st.markdown("---")
-        st.info("ℹ️ Para asignar países a los colegios preinscriptos, cargá las representaciones directamente en la solapa **`ASIGNACIONES`** de tu Google Sheets. El portal docente las reconocerá inmediatamente.")
+        st.info("ℹ️ Para asignar países a las escuelas, cargá las filas directamente en la solapa **`ASIGNACIONES`** de tu Google Sheets. El portal de los docentes las mostrará automáticamente.")
 
     # ---------------------------------------------------------
     # MÓDULO 1: REVISIÓN DE PAGOS Y MODIFICACIONES
@@ -146,7 +138,9 @@ if admin_pass == "Secretaria2026":
                 else:
                     for esc in pendientes_filtrados:
                         with st.expander(f"🏫 {esc.get('nombre_colegio')} ({esc.get('id_delegacion')})"):
-                            st.write(f"**Contacto:** {esc.get('docente_cargo')} ({esc.get('email_contacto')}) | Teléfono: {esc.get('telefono_contacto')}")
+                            st.write(f"**Docente Cargo:** {esc.get('docente_apellido_nombre')} ({esc.get('docente_email')}) | Tel: {esc.get('docente_telefono')}")
+                            st.write(f"**Dirección Institucional:** {esc.get('direccion_escuela')}")
+                            
                             propuesta_raw = esc.get("propuesta_modificacion", "{}")
                             try:
                                 prop = json.loads(propuesta_raw)
@@ -230,7 +224,7 @@ if admin_pass == "Secretaria2026":
             st.dataframe(pd.DataFrame(lista_procesada), use_container_width=True, hide_index=True)
 
     # ---------------------------------------------------------
-    # MÓDULO 3: BÚSQUEDA RÁPIDA
+    # MÓDULO 3: BÚSQUEDA RÁPIDA POR DNI
     # ---------------------------------------------------------
     elif menu == "3. Búsqueda Rápida por DNI":
         st.subheader(f"🔍 Buscador Global de Participantes - {modelo_seleccionado}")
