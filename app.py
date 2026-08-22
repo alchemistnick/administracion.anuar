@@ -1,10 +1,11 @@
 import streamlit as st
 import requests
-import base64
+import json
+import pandas as pd
 
 st.set_page_config(
-    page_title="Gestión MNU - Portal Escuelas",
-    page_icon="🇺🇳",
+    page_title="Secretariado - Control Interno MNU",
+    page_icon="🛡️",
     layout="wide"
 )
 
@@ -16,22 +17,28 @@ def cargar_modelos_activos():
         res = requests.get(f"{API_URL}?action=GET_MODELOS_ACTIVOS").json()
         if res.get("status") == "SUCCESS":
             modelos = res.get("data", [])
-            return {m["nombre_visible"]: m["id_modelo"] for m in modelos}
+            return {m.get("nombre_visible", "Modelo"): m.get("id_modelo") for m in modelos if m.get("id_modelo")}
         return {}
     except Exception:
         return {}
 
-@st.cache_data(ttl=60)
-def cargar_modalidades_modelo(id_modelo):
+@st.cache_data(ttl=30)
+def cargar_todas_nominas_cached(id_mod):
     try:
-        res = requests.get(f"{API_URL}?action=GET_MODALIDADES_MODELO&id_modelo={id_modelo}").json()
-        if res.get("status") == "SUCCESS":
-            return res.get("data", [])
-        return []
+        res = requests.get(f"{API_URL}?action=GET_TODAS_NOMINAS&id_modelo={id_mod}").json()
+        return res.get("data", [])
     except Exception:
         return []
 
-st.title("🇺🇳 Portal de Inscripción y Carga - Modelos ONU")
+@st.cache_data(ttl=30)
+def cargar_escuelas_aprobadas_cached(id_mod):
+    try:
+        res = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_mod}").json()
+        return res.get("data", [])
+    except Exception:
+        return []
+
+st.title("🛡️ Panel Interno del Secretariado - Control y Gestión Global")
 
 CONFIG_MODELOS = cargar_modelos_activos()
 
@@ -41,231 +48,203 @@ if not CONFIG_MODELOS:
     st.sidebar.warning("⚠️ No hay modelos activos configurados en la planilla.")
     st.stop()
 else:
-    modelo_seleccionado = st.sidebar.selectbox("Elegí el Modelo a Gestionar:", list(CONFIG_MODELOS.keys()))
+    modelo_seleccionado = st.sidebar.selectbox("Elegí el Modelo a Auditar:", list(CONFIG_MODELOS.keys()))
     id_modelo_actual = CONFIG_MODELOS[modelo_seleccionado]
 
 st.sidebar.markdown("---")
 
-menu = st.sidebar.radio(
-    "Navegación",
-    [
-        "1. Preinscripción Escuela", 
-        "2. Cargar Comprobante", 
-        "3. Carga de Nómina y Fichas"
-    ]
-)
+admin_pass = st.sidebar.text_input("🔐 Contraseña Secretariado", type="password")
 
-# ---------------------------------------------------------
-# MÓDULO 1: PREINSCRIPCIÓN ESCUELA
-# ---------------------------------------------------------
-if menu == "1. Preinscripción Escuela":
-    st.subheader(f"Ficha de Preinscripción por Escuela - {modelo_seleccionado}")
-    modalidades_evento = cargar_modalidades_modelo(id_modelo_actual)
-
-    with st.form("form_registro_unificado"):
-        st.markdown("### 🏛️ DATOS DE LA INSTITUCIÓN")
-        colegio = st.text_input("Nombre de la Escuela *")
-        direccion = st.text_input("Dirección (Localidad, Provincia, País) *")
-        
-        col_inst1, col_inst2 = st.columns(2)
-        with col_inst1:
-            email_inst = st.text_input("Correo electrónico institucional *")
-        with col_inst2:
-            tel_inst = st.text_input("Número de teléfono de la escuela *")
-        
-        st.markdown("---")
-        st.markdown("### 👤 DATOS DEL RESPONSABLE / PROFESOR A CARGO")
-        st.caption("En esta instancia de inscripción se requerirán los datos de un solo responsable.")
-        
-        docente_ape_nom = st.text_input("Apellido y Nombre del Responsable *")
-        
-        col_doc1, col_doc2 = st.columns(2)
-        with col_doc1:
-            docente_email = st.text_input("Correo electrónico personal/docente *")
-        with col_doc2:
-            docente_tel = st.text_input("Número de teléfono móvil *")
-
-        col_sec1, col_sec2 = st.columns(2)
-        with col_sec1:
-            cant_docentes = st.number_input("Cantidad TOTAL de Docentes Acompañantes que asistirán:", min_value=1, max_value=10, value=1)
-        with col_sec2:
-            clave = st.text_input("Creá una Clave Secreta para acceder al Portal *", type="password")
-        
-        st.markdown("---")
-        st.markdown("### 🇺🇳 DATOS DE LAS DELEGACIONES")
-        
-        respuestas_modalidades = {}
-        tot_alumnos = 0
-        
-        cols = st.columns(2)
-        for idx, mod in enumerate(modalidades_evento):
-            col_curr = cols[idx % 2]
-            with col_curr:
-                lbl = f"{mod['etiqueta_visible']} ({mod['delegados_por_unidad']} delegados/unidad)"
-                cant = st.number_input(
-                    lbl, 
-                    min_value=0, 
-                    max_value=int(mod.get('max_permitido', 5)), 
-                    value=0, 
-                    key=f"new_{id_modelo_actual}_{mod['clave_modalidad']}"
-                )
-                respuestas_modalidades[mod['clave_modalidad']] = cant
-                tot_alumnos += cant * int(mod['delegados_por_unidad'])
-                
-        desglose_str = " | ".join([f"{k}:{v}" for k, v in respuestas_modalidades.items()])
-
-        st.info(f"📊 **Total de participantes a inscribir:** {tot_alumnos} estudiantes + {cant_docentes} docente(s) acompañante(s).")
-        
-        submitted = st.form_submit_button("Enviar Preinscripción")
-        
-        if submitted:
-            if not colegio or not direccion or not email_inst or not tel_inst or not docente_ape_nom or not docente_email or not docente_tel or not clave:
-                st.error("Por favor completá todos los campos obligatorios (*).")
-            elif tot_alumnos == 0:
-                st.warning("Debés seleccionar al menos 1 delegación en alguna modalidad.")
-            else:
-                payload = {
-                    "action": "REGISTRAR_DELEGACION",
-                    "data": {
-                        "id_modelo": id_modelo_actual,
-                        "nombre_colegio": colegio,
-                        "direccion_escuela": direccion,
-                        "email_institucional": email_inst,
-                        "telefono_institucional": tel_inst,
-                        "docente_apellido_nombre": docente_ape_nom,
-                        "docente_email": docente_email,
-                        "docente_telefono": docente_tel,
-                        "docentes_acompanantes": cant_docentes,
-                        "secret_hash": clave,
-                        "cupos_solicitados": tot_alumnos,
-                        "desglose_modalidades": desglose_str
-                    }
-                }
-                
-                with st.spinner("Registrando preinscripción..."):
-                    try:
-                        res = requests.post(API_URL, json=payload).json()
-                        if res.get("status") == "SUCCESS":
-                            st.success(f"¡Preinscripción enviada con éxito para **{modelo_seleccionado}**! Código de delegación: **{res['data']['id_delegacion']}**")
-                        else:
-                            st.error(f"Error: {res.get('message')}")
-                    except Exception as e:
-                        st.error(f"Error de conexión: {e}")
-
-# ---------------------------------------------------------
-# MÓDULO 2: CARGAR COMPROBANTE DE PAGO
-# ---------------------------------------------------------
-elif menu == "2. Cargar Comprobante":
-    st.subheader(f"Acreditación de Pago - {modelo_seleccionado}")
+if admin_pass == "Secretaria2026":
+    st.sidebar.success("Acceso Autorizado")
     
-    with st.form("form_pago"):
-        id_del = st.text_input("Código de Delegación (Ej: DEL-001) *")
-        clave = st.text_input("Clave Secreta de la Escuela *", type="password")
-        monto = st.number_input("Monto Transferido ($) *", min_value=1.0, step=100.0)
-        archivo = st.file_uploader("Adjuntar Comprobante (PDF o Imagen) *", type=["pdf", "png", "jpg", "jpeg"])
-        
-        btn_pago = st.form_submit_button("Subir Comprobante")
-        
-        if btn_pago:
-            if not id_del or not clave or not archivo:
-                st.error("Completá todos los campos obligatorios.")
-            else:
-                file_bytes = archivo.read()
-                base64_file = base64.b64encode(file_bytes).decode('utf-8')
-                
-                payload = {
-                    "action": "SUBIR_COMPROBANTE_PAGO",
-                    "data": {
-                        "id_delegacion": id_del.strip().upper(),
-                        "secret_hash": clave,
-                        "monto": monto,
-                        "file_base64": base64_file,
-                        "file_name": archivo.name,
-                        "file_mime": archivo.type
-                    }
-                }
-                with st.spinner("Subiendo comprobante a Drive..."):
-                    try:
-                        res = requests.post(API_URL, json=payload).json()
-                        if res.get("status") == "SUCCESS":
-                            st.success("¡Comprobante recibido! Queda en revisión por el Secretariado.")
-                        else:
-                            st.error(f"Error: {res.get('message')}")
-                    except Exception as e:
-                        st.error(f"Error de conexión: {e}")
+    menu = st.sidebar.radio(
+        "Módulos de Gestión",
+        [
+            "📊 Dashboard & Estado del Modelo",
+            "1. Revisión de Pagos y Modificaciones", 
+            "2. Nómina General de Participantes",
+            "3. Búsqueda Rápida por DNI"
+        ]
+    )
 
-# ---------------------------------------------------------
-# MÓDULO 3: CARGA DE NÓMINA Y FICHAS
-# ---------------------------------------------------------
-elif menu == "3. Carga de Nómina y Fichas":
-    st.subheader(f"Nómina de Participantes y Documentación - {modelo_seleccionado}")
-    
-    col_auth1, col_auth2 = st.columns(2)
-    with col_auth1:
-        id_del = st.text_input("Código de Delegación (Ej: DEL-001):")
-    with col_auth2:
-        clave = st.text_input("Clave Secreta:", type="password")
+    # ---------------------------------------------------------
+    # MÓDULO 0: DASHBOARD
+    # ---------------------------------------------------------
+    if menu == "📊 Dashboard & Estado del Modelo":
+        st.subheader(f"📈 Estado General del Evento - {modelo_seleccionado}")
         
-    if id_del and clave:
-        try:
-            res_asig = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion={id_del.strip().upper()}").json()
-            asignaciones = res_asig.get("data", [])
+        with st.spinner("Cargando métricas..."):
+            escuelas_aprobadas = cargar_escuelas_aprobadas_cached(id_modelo_actual)
+            todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
+
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.metric("🏫 Escuelas Aprobadas", len(escuelas_aprobadas))
+        with m2:
+            tot_cupos = sum([int(e.get("cupos_solicitados", 0)) for e in escuelas_aprobadas if str(e.get("cupos_solicitados", "0")).isdigit()])
+            st.metric("👥 Cupos Solicitados", tot_cupos)
+        with m3:
+            st.metric("👤 Participantes Cargados", len(todas_nominas))
+        with m4:
+            fichas_ok = sum([1 for n in todas_nominas if n.get("drive_ficha_id") and str(n.get("drive_ficha_id")).strip() != "-"])
+            st.metric("📄 Fichas Médicas Recibidas", fichas_ok)
+
+        st.markdown("---")
+        st.info("ℹ️ Para generar y poblar las bancas automáticamente, completá las pestañas **`CS`**, **`AG`**, **`FORO DE DAVOS`** y **`COMITE DE PRENSA`** en tu Google Sheet y ejecutá la función `generarMatrizYAsignacionesAutomatica()` en Google Apps Script.")
+
+    # ---------------------------------------------------------
+    # MÓDULO 1: REVISIÓN DE PAGOS Y MODIFICACIONES
+    # ---------------------------------------------------------
+    elif menu == "1. Revisión de Pagos y Modificaciones":
+        st.subheader(f"Auditoría General - {modelo_seleccionado}")
+        tab_pagos, tab_modificaciones = st.tabs(["💳 Comprobantes de Pago", "✏️ Solicitudes de Cambio de Cupos"])
+        
+        with tab_pagos:
+            try:
+                res = requests.get(f"{API_URL}?action=GET_PAGOS_PENDIENTES").json()
+                pagos = res.get("data", [])
+                pagos_filtrados = [p for p in pagos if p.get("id_modelo") == id_modelo_actual or not p.get("id_modelo")]
+                
+                if not pagos_filtrados:
+                    st.success(f"No hay comprobantes pendientes para {modelo_seleccionado}.")
+                else:
+                    for pago in pagos_filtrados:
+                        with st.expander(f"💳 Pago {pago.get('id_pago', '-')} | Delegación: {pago.get('id_delegacion', '-')} | Monto: ${pago.get('monto', 0)}"):
+                            col_a, col_b = st.columns([2, 1])
+                            with col_a:
+                                st.write(f"**Fecha:** {pago.get('fecha_subida', '-')}")
+                                if pago.get('drive_file_url') and pago['drive_file_url'] != "-":
+                                    st.markdown(f"[📄 **Ver Comprobante**]({pago['drive_file_url']})", unsafe_allow_html=True)
+                            with col_b:
+                                if st.button("✅ APROBAR PAGO", key=f"app_{pago.get('id_pago')}"):
+                                    payload = {"action": "CAMBIAR_ESTADO_PAGO", "usuario": "ADMIN", "data": {"id_pago": pago.get('id_pago'), "nuevo_estado": "APROBADO"}}
+                                    r = requests.post(API_URL, json=payload).json()
+                                    if r.get("status") == "SUCCESS":
+                                        st.cache_data.clear()
+                                        st.success("Aprobado")
+                                        st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+        with tab_modificaciones:
+            try:
+                res_mod = requests.get(f"{API_URL}?action=GET_MODIFICACIONES_PENDIENTES").json()
+                pendientes_mod = res_mod.get("data", [])
+                pendientes_filtrados = [d for d in pendientes_mod if d.get("id_modelo") == id_modelo_actual or not d.get("id_modelo")]
+                
+                if not pendientes_filtrados:
+                    st.success("No hay solicitudes pendientes.")
+                else:
+                    for esc in pendientes_filtrados:
+                        with st.expander(f"🏫 {esc.get('nombre_colegio')} ({esc.get('id_delegacion')})"):
+                            st.write(f"**Docente Cargo:** {esc.get('docente_apellido_nombre')} ({esc.get('docente_email')}) | Tel: {esc.get('docente_telefono')}")
+                            st.write(f"**Dirección Institucional:** {esc.get('direccion_escuela')}")
+                            
+                            propuesta_raw = esc.get("propuesta_modificacion", "{}")
+                            try:
+                                prop = json.loads(propuesta_raw)
+                            except Exception:
+                                prop = {}
+                            
+                            nuevos_cupos = prop.get("nuevos_cupos", esc.get("cupos_solicitados"))
+                            nuevo_desglose = prop.get("nuevo_desglose", esc.get("desglose_modalidades"))
+                            docentes_acomp = prop.get("docentes_acompanantes", esc.get("docentes_acompanantes"))
+
+                            st.write(f"• **Nuevos Cupos Estudiantes:** {nuevos_cupos}")
+                            st.write(f"• **Nuevos Docentes Acompañantes:** {docentes_acomp}")
+                            st.write(f"• **Desglose:** {nuevo_desglose}")
+                            
+                            col_m1, col_m2 = st.columns(2)
+                            with col_m1:
+                                if st.button("✅ APROBAR MODIFICACIÓN", key=f"app_mod_{esc.get('id_delegacion')}"):
+                                    payload = {"action": "RESPONDER_MODIFICACION_PREINSCRIPCION", "usuario": "ADMIN", "data": {"id_delegacion": esc.get('id_delegacion'), "aprobar": True, "nuevos_cupos": nuevos_cupos, "nuevo_desglose": nuevo_desglose, "docentes_acompanantes": docentes_acomp}}
+                                    r = requests.post(API_URL, json=payload).json()
+                                    if r.get("status") == "SUCCESS":
+                                        st.cache_data.clear()
+                                        st.success("Aprobado")
+                                        st.rerun()
+
+                            with col_m2:
+                                if st.button("❌ RECHAZAR CAMBIO", key=f"rej_mod_{esc.get('id_delegacion')}"):
+                                    payload = {"action": "RESPONDER_MODIFICACION_PREINSCRIPCION", "usuario": "ADMIN", "data": {"id_delegacion": esc.get('id_delegacion'), "aprobar": False}}
+                                    r = requests.post(API_URL, json=payload).json()
+                                    if r.get("status") == "SUCCESS":
+                                        st.cache_data.clear()
+                                        st.info("Rechazado")
+                                        st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    # ---------------------------------------------------------
+    # MÓDULO 2: NÓMINA GENERAL
+    # ---------------------------------------------------------
+    elif menu == "2. Nómina General de Participantes":
+        st.subheader(f"📋 Nómina Consolidada de Participantes - {modelo_seleccionado}")
+        todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
+
+        if not todas_nominas:
+            st.info("Aún no hay participantes cargados.")
+        else:
+            col_f1, col_f2 = st.columns([2, 1])
+            with col_f1:
+                filtro_busqueda = st.text_input("🔍 Filtrar por Nombre, Apellido, DNI o Escuela:")
+            with col_f2:
+                filtro_doc = st.selectbox("Estado Documentación:", ["Todos", "Ficha Médica Pendiente", "Autorización Pendiente", "Documentación Completa"])
+
+            lista_procesada = []
+            for n in todas_nominas:
+                ficha_ok = n.get("drive_ficha_id") and str(n.get("drive_ficha_id")).strip() != "-"
+                aut_ok = n.get("drive_autorizacion_id") and str(n.get("drive_autorizacion_id")).strip() != "-"
+                
+                if filtro_doc == "Ficha Médica Pendiente" and ficha_ok:
+                    continue
+                if filtro_doc == "Autorización Pendiente" and aut_ok:
+                    continue
+                if filtro_doc == "Documentación Completa" and (not ficha_ok or not aut_ok):
+                    continue
+
+                nom_comp = f"{n.get('nombre', '')} {n.get('apellido', '')}".strip() or n.get("nombre_completo", "")
+                query = filtro_busqueda.strip().lower()
+                if query:
+                    if not (query in nom_comp.lower() or query in str(n.get("dni", "")).lower() or query in str(n.get("id_delegacion", "")).lower()):
+                        continue
+
+                lista_procesada.append({
+                    "ID Delegado": n.get("id_delegado", "-"),
+                    "Escuela / ID": n.get("id_delegacion", "-"),
+                    "Nombre": n.get("nombre", "-"),
+                    "Apellido": n.get("apellido", "-"),
+                    "DNI": n.get("dni", "-"),
+                    "Rol": n.get("rol_mnu", "-"),
+                    "Ficha Médica": "✅ OK" if ficha_ok else "❌ Pendiente",
+                    "Autorización Imagen": "✅ OK" if aut_ok else "❌ Pendiente"
+                })
+
+            st.dataframe(pd.DataFrame(lista_procesada), use_container_width=True, hide_index=True)
+
+    # ---------------------------------------------------------
+    # MÓDULO 3: BÚSQUEDA RÁPIDA POR DNI
+    # ---------------------------------------------------------
+    elif menu == "3. Búsqueda Rápida por DNI":
+        st.subheader(f"🔍 Buscador Global de Participantes - {modelo_seleccionado}")
+        busqueda = st.text_input("Ingresá DNI, Nombre, Apellido o ID Delegación:")
+        
+        if busqueda:
+            todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
+            query = busqueda.strip().lower()
+            resultados = [n for n in todas_nominas if query in str(n.get("dni", "")).lower() or query in str(n.get("nombre", "")).lower() or query in str(n.get("apellido", "")).lower() or query in str(n.get("id_delegacion", "")).lower()]
             
-            if not asignaciones:
-                st.info("Aún no se registran asignaciones de países para esta escuela.")
+            if not resultados:
+                st.warning(f"No hay coincidencias para '{busqueda}'.")
             else:
-                st.success(f"Se encontraron **{len(asignaciones)}** bancas/lugares asignados:")
-                
-                for asig in asignaciones:
-                    with st.expander(f"📌 {asig.get('organo')} - País: {asig.get('pais')}"):
-                        with st.form(f"form_nom_{asig.get('id_asignacion')}"):
-                            nombre = st.text_input("Nombre del Estudiante *")
-                            apellido = st.text_input("Apellido del Estudiante *")
-                            dni = st.text_input("DNI / Pasaporte *")
-                            alergias = st.text_area("Alergias o Indicaciones Médicas", value="Ninguna")
-                            
-                            ficha_file = st.file_uploader("Ficha Médica (PDF/Imagen) *", type=["pdf", "png", "jpg", "jpeg"], key=f"f_{asig.get('id_asignacion')}")
-                            aut_file = st.file_uploader("Autorización de Imagen (PDF/Imagen) *", type=["pdf", "png", "jpg", "jpeg"], key=f"a_{asig.get('id_asignacion')}")
-                            
-                            btn_nom = st.form_submit_button("Guardar Alumno")
-                            
-                            if btn_nom:
-                                if not nombre or not apellido or not dni:
-                                    st.error("Nombre, Apellido y DNI son obligatorios.")
-                                else:
-                                    f_b64, a_b64 = "", ""
-                                    f_name, a_name = "", ""
-                                    f_mime, a_mime = "", ""
-                                    
-                                    if ficha_file:
-                                        f_b64 = base64.b64encode(ficha_file.read()).decode('utf-8')
-                                        f_name = ficha_file.name
-                                        f_mime = ficha_file.type
-                                    if aut_file:
-                                        a_b64 = base64.b64encode(aut_file.read()).decode('utf-8')
-                                        a_name = aut_file.name
-                                        a_mime = aut_file.type
-                                        
-                                    payload = {
-                                        "action": "GUARDAR_PARTICIPANTE_NOMINA",
-                                        "data": {
-                                            "id_delegacion": id_del.strip().upper(),
-                                            "secret_hash": clave,
-                                            "id_modelo": id_modelo_actual,
-                                            "id_asignacion": asig.get("id_asignacion"),
-                                            "rol_mnu": f"{asig.get('organo')} - {asig.get('pais')}",
-                                            "nombre": nombre,
-                                            "apellido": apellido,
-                                            "dni": dni,
-                                            "alergias_medicas": alergias,
-                                            "ficha_b64": f_b64, "ficha_name": f_name, "ficha_mime": f_mime,
-                                            "aut_b64": a_b64, "aut_name": a_name, "aut_mime": a_mime
-                                        }
-                                    }
-                                    res_save = requests.post(API_URL, json=payload).json()
-                                    if res_save.get("status") == "SUCCESS":
-                                        st.success("¡Alumno guardado correctamente!")
-                                    else:
-                                        st.error(f"Error: {res_save.get('message')}")
-        except Exception as e:
-            st.error(f"Error al cargar asignaciones: {e}")
+                for r in resultados:
+                    nombre_mostrar = f"{r.get('nombre', '')} {r.get('apellido', '')}".strip() or r.get("nombre_completo", "")
+                    with st.expander(f"👤 {nombre_mostrar} | DNI: {r.get('dni', '-')} | Escuela: {r.get('id_delegacion', '-')}"):
+                        st.write(f"**Rol:** {r.get('rol_mnu', '-')}")
+                        st.write(f"**Alergias:** {r.get('alergias_medicas', 'Ninguna')}")
+
+elif admin_pass:
+    st.error("🔒 Contraseña incorrecta.")
+else:
+    st.warning("👈 Por favor ingresá la contraseña del Secretariado en el menú lateral.")
