@@ -10,7 +10,7 @@ st.set_page_config(
 )
 
 # URL DE LA NUEVA IMPLEMENTACIÓN DE APPS SCRIPT
-API_URL = "https://script.google.com/macros/s/AKfycbwYs8HxvNT1wpArXLXb1GNcZN7pp1Vroyaz8Z06h74i7MnRLgRPmIz5lngSwm5loCLufg/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbwI2BfDpW9NL4jU4qP9il0HFRyBOQGVTeYbqt44q3UG3EEh7ry8w2jR4kOBJCZfLTZeOw/exec"
 
 @st.cache_data(ttl=60)
 def cargar_modelos_activos():
