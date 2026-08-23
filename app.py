@@ -22,7 +22,6 @@ def api_get(action, params=""):
     except Exception:
         return []
 
-# Función segura para descargar tablas directamente a Excel sin dependencias externas
 def descargar_excel_html(df, nombre_archivo):
     html = df.to_html(index=False)
     b64 = base64.b64encode(html.encode("utf-8")).decode("utf-8")
@@ -32,7 +31,7 @@ def descargar_excel_html(df, nombre_archivo):
 st.title("👑 Panel de Control - Secretaría / Administración")
 
 # ---------------------------------------------------------
-# AUTENTICACIÓN ADMINISTRATIVA (Contraseña de Acceso)
+# AUTENTICACIÓN ADMINISTRATIVA
 # ---------------------------------------------------------
 if "admin_logueado" not in st.session_state:
     st.session_state["admin_logueado"] = False
@@ -44,7 +43,6 @@ if not st.session_state["admin_logueado"]:
         btn_ingresar = st.form_submit_button("Ingresar al Panel")
         
         if btn_ingresar:
-            # Podes cambiar "secreta2026" por la contraseña que prefieras
             if pass_ingresada.strip() == "secreta2026":
                 st.session_state["admin_logueado"] = True
                 st.success("¡Acceso concedido!")
@@ -53,7 +51,6 @@ if not st.session_state["admin_logueado"]:
                 st.error("Contraseña incorrecta.")
     st.stop()
 
-# Botón para cerrar sesión de admin en la barra lateral
 if st.sidebar.button("Cerrar Sesión Admin"):
     st.session_state["admin_logueado"] = False
     st.rerun()
@@ -71,7 +68,7 @@ id_modelo_actual = dict_modelos[modelo_seleccionado]
 st.sidebar.markdown("---")
 
 # ---------------------------------------------------------
-# NAVEGACIÓN SEGURA POR PESTAÑAS (TABS) PARA EVITAR BUGS
+# NAVEGACIÓN POR PESTAÑAS (TABS)
 # ---------------------------------------------------------
 tab_dash, tab_ficha, tab_pagos, tab_paises, tab_medicos = st.tabs([
     "📊 Dashboard y KPIs", 
@@ -222,7 +219,7 @@ with tab_pagos:
 # ---------------------------------------------------------
 with tab_paises:
     st.subheader("🌍 Control de Disponibilidad de Órganos y Países")
-    st.markdown("💡 **Cómo verificar:** En tu Google Sheet, dirigite a la solapa **`Organos`**. Aquellas filas cuya **Columna E (`id_asignacion`)** aparezca con un guion `"-"` indican que ese país u órgano todavía **no ha sido asignado** a ninguna institución.")
+    st.write("En tu Google Sheet, dirigite a la solapa Organos. Aquellas filas cuya Columna E (id_asignacion) aparezca con un guion '-' indican que ese país u órgano todavía no ha sido asignado a ninguna institución.")
 
 # ---------------------------------------------------------
 # 5. ALERTAS MÉDICAS
