@@ -8,7 +8,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# URL DE LA API DE APPS SCRIPT ACTUALIZADA
+# NUEVA URL DE LA API DE APPS SCRIPT ACTUALIZADA
 API_URL = "https://script.google.com/macros/s/AKfycbxMsoNWVYS9CJRHSj22s25ivYY6ITSK6vj059JmjDKb_YMr0Qy8GyLQx3fQqQWf7PwJHA/exec"
 
 def api_get(action, params=""):
@@ -71,7 +71,7 @@ id_modelo_actual = dict_modelos[modelo_seleccionado]
 st.sidebar.markdown("---")
 
 # ---------------------------------------------------------
-# NAVEGACIÓN POR PESTAÑAS (TABS) - CON MÓDULO DE AUDITORÍA NUEVO
+# NAVEGACIÓN POR PESTAÑAS (TABS)
 # ---------------------------------------------------------
 tab_dash, tab_ficha, tab_auditoria, tab_pagos, tab_paises, tab_medicos = st.tabs([
     "📊 Dashboard y KPIs", 
@@ -168,7 +168,7 @@ with tab_ficha:
             descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
 
 # ---------------------------------------------------------
-# 3. NUEVO MÓDULO: AUDITORÍA Y APROBACIÓN FINAL DE LEGAJOS
+# 3. MÓDULO DE AUDITORÍA Y APROBACIÓN FINAL
 # ---------------------------------------------------------
 with tab_auditoria:
     st.subheader("🔍 Auditoría de Documentación y Aprobación Final")
@@ -213,7 +213,6 @@ with tab_auditoria:
                         st.write("📝 Autorización: No adjunta")
                 st.markdown("---")
 
-            # Botón de Aprobación Final
             if st.button(f"✅ Aprobar Legajo Completo y Enviar Resumen por Mail", key=f"btn_aprobar_{id_del_aud}"):
                 payload_aprobacion = {
                     "action": "APROBAR_LEGAJO_ESCUELA",
@@ -299,7 +298,7 @@ with tab_medicos:
     nominas_medicas = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
     
     if nominas_medicas:
-        alerta_nominas = [n for n in nominas_medicas if n.get("alergias_medicas"] and str(n.get("alergias_medicas")).strip().lower() not in ["ninguna", "-", ""]]
+        alerta_nominas = [n for n in nominas_medicas if n.get("alergias_medicas") and str(n.get("alergias_medicas")).strip().lower() not in ["ninguna", "-", ""]]
         
         if not alerta_nominas:
             st.success("✅ No hay alertas médicas registradas.")
