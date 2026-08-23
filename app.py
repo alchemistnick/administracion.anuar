@@ -306,36 +306,46 @@ with tab_pagos:
         else:
             st.info("No hay registros de pagos cargados.")
 
-# 5. PAÍSES Y BANCAS (ACTUALIZADO CON TABLA INTERACTIVA)
+# 5. PAÍSES Y BANCAS (CON SEPARACIÓN DE ASIGNADOS Y DISPONIBLES)
 with tab_paises:
     st.subheader("🌍 Control de Disponibilidad de Órganos y Países")
-    st.write("Listado general de órganos, comités y estados de asignación sincronizados desde la base de datos:")
-
-    organos_data = api_get("GET_MODELOS_ACTIVOS") # O en su defecto levantamos la tabla de órganos si creamos la acción GET, o directo por stream si prefieres. 
-    # Como alternativa directa y robusta usando una acción estándar o lectura de asignaciones:
-    asignaciones_totales = api_get("GET_ASIGNACIONES_DELEGACION&id_delegacion=") # Si tu API trae todas las asignaciones sin filtrar
     
-    # Vamos a leer directamente la solapa Organos llamando a una función auxiliar o listando las asignaciones existentes:
-    res_org = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion=TODAS").json()
-    bancas_globales = res_org.get("data", [])
-
-    # Creamos una vista en tabla interactiva para el secretariado
-    sheet_organos_data = api_get("GET_MODALIDADES_MODELO", f"&id_modelo={id_modelo_actual}") # O leemos la tabla de órganos
-    
-    # Método directo y seguro: traemos las asignaciones de la solapa ASIGNACIONES
-    url_asig_todas = f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion=TODAS_GENERAL"
-    # Para asegurar que visualice perfecto, levantamos los datos con un endpoint general o dataframe limpio:
     try:
         res_full_asig = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion=").json()
         tabla_bancas = res_full_asig.get("data", [])
+        
         if tabla_bancas:
             df_bancas = pd.DataFrame(tabla_bancas).astype(str)
-            st.dataframe(df_bancas, use_container_width=True)
-            descargar_csv_para_excel(df_bancas, "control_paises_y_bancas")
+            
+            # Filtramos los que están sin asignar (id_delegacion_asignada vacío, '-', o nulo)
+            sin_asignar = df_bancas[
+                df_bancas['id_delegacion_asignada'].str.strip().isin(["", "-", "nan", "None"]) | 
+                df_bancas['id_delegacion_asignada'].isna()
+            ]
+            
+            asignados = df_bancas[
+                ~df_bancas['id_delegacion_asignada'].str.strip().isin(["", "-", "nan", "None"]) & 
+                df_bancas['id_delegacion_asignada'].notna()
+            ]
+
+            st.markdown(f"### 🟢 Países y Bancas Disponibles (Sin Asignar): `{len(sin_asignar)}`")
+            if not sin_asignar.empty:
+                st.dataframe(sin_asignar[["id_asignacion", "organo", "pais", "id_modelo"]], use_container_width=True)
+                descargar_csv_para_excel(sin_asignar, "paises_disponibles_sin_asignar")
+            else:
+                st.success("🎉 ¡No hay países libres! Todas las bancas se encuentran asignadas.")
+
+            st.markdown("---")
+            st.markdown(f"### 🔒 Países y Bancas Ya Asignadas: `{len(asignados)}`")
+            if not asignados.empty:
+                st.dataframe(asignados, use_container_width=True)
+                descargar_csv_para_excel(asignados, "paises_asignados")
+            else:
+                st.info("Aún no hay instituciones con países asignados.")
         else:
-            st.info("No hay registros de asignaciones cargados todavía en la solapa ASIGNACIONES.")
+            st.info("No hay registros de asignaciones cargados todavía.")
     except Exception as e:
-        st.info("Visualización general de órganos activa. Verificá la solapa Organos en tu Google Sheet.")
+        st.error(f"Error al cargar la disponibilidad de países: {e}")
 
 # 6. ALERTAS MÉDICAS
 with tab_medicos:
