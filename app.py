@@ -8,7 +8,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# NUEVA URL DE LA API DE APPS SCRIPT ACTUALIZADA
+# URL DE LA API DE APPS SCRIPT ACTUALIZADA
 API_URL = "https://script.google.com/macros/s/AKfycbyII4nyjSmpkku1ys1MgUNu_p071hIf9c2PpihRj0t3r4pGBSH7Ma47qUsmIk0NfUu1mQ/exec"
 
 def api_get(action, params=""):
@@ -168,11 +168,11 @@ with tab_ficha:
             descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
 
 # ---------------------------------------------------------
-# 3. MÓDULO DE AUDITORÍA Y APROBACIÓN FINAL
+# 3. MÓDULO DE AUDITORÍA Y APROBACIÓN / RECHAZO FINAL
 # ---------------------------------------------------------
 with tab_auditoria:
     st.subheader("🔍 Auditoría de Documentación y Aprobación Final")
-    st.markdown("Revisá los alumnos cargados por la escuela, verificá sus fichas y autorizaciones en Google Drive, y aprobá formalmente la delegación para enviarle el resumen por correo.")
+    st.markdown("Revisá los alumnos cargados por la escuela, verificá sus fichas y autorizaciones en Drive, y tomá una decisión sobre el legajo.")
 
     delegaciones_aud = api_get("GET_TODAS_DELEGACIONES", f"&id_modelo={id_modelo_actual}")
     
@@ -213,23 +213,54 @@ with tab_auditoria:
                         st.write("📝 Autorización: No adjunta")
                 st.markdown("---")
 
-            if st.button(f"✅ Aprobar Legajo Completo y Enviar Resumen por Mail", key=f"btn_aprobar_{id_del_aud}"):
-                payload_aprobacion = {
-                    "action": "APROBAR_LEGAJO_ESCUELA",
-                    "data": {
-                        "id_delegacion": id_del_aud
+            # Botonera de Decisión
+            col_btn1, col_btn2 = st.columns(2)
+            
+            with col_btn1:
+                if st.button(f"✅ Aprobar Legajo Completo", key=f"btn_aprobar_{id_del_aud}", use_container_width=True):
+                    payload_aprobacion = {
+                        "action": "APROBAR_LEGAJO_ESCUELA",
+                        "data": {"id_delegacion": id_del_aud}
                     }
-                }
-                with st.spinner("Aprobando legajo y enviando correo con el totalizador..."):
-                    try:
-                        res_ap = requests.post(API_URL, json=payload_aprobacion).json()
-                        if res_ap.get("status") == "SUCCESS":
-                            st.success("¡Legajo aprobado con éxito! Se le envió un correo automático a la escuela con el resumen totalizador.")
-                            st.rerun()
-                        else:
-                            st.error(f"Error: {res_ap.get('message')}")
-                    except Exception as e:
-                        st.error(f"Error de conexión: {e}")
+                    with st.spinner("Aprobando legajo y enviando correo..."):
+                        try:
+                            res_ap = requests.post(API_URL, json=payload_aprobacion).json()
+                            if res_ap.get("status") == "SUCCESS":
+                                st.success("¡Legajo aprobado con éxito!")
+                                st.rerun()
+                            else:
+                                st.error(f"Error: {res_ap.get('message')}")
+                        except Exception as e:
+                            st.error(f"Error de conexión: {e}")
+
+            with col_btn2:
+                # Botón desplegable / Expander para el formulario de rechazo con motivo
+                with st.expander("❌ Rechazar Legajo con Observaciones"):
+                    with st.form(key=f"form_rechazo_{id_del_aud}"):
+                        motivo_rechazo = st.text_area("Indique el motivo del rechazo o corrección necesaria:")
+                        btn_enviar_rechazo = st.form_submit_button("Confirmar Rechazo y Notificar")
+                        
+                        if btn_enviar_rechazo:
+                            if not motivo_rechazo.strip():
+                                st.error("Debe ingresar un motivo para el rechazo.")
+                            else:
+                                payload_rechazo = {
+                                    "action": "RECHAZAR_LEGAJO_ESCUELA",
+                                    "data": {
+                                        "id_delegacion": id_del_aud,
+                                        "motivo": motivo_rechazo
+                                    }
+                                }
+                                with st.spinner("Procesando rechazo y enviando correo..."):
+                                    try:
+                                        res_rec = requests.post(API_URL, json=payload_rechazo).json()
+                                        if res_rec.get("status") == "SUCCESS":
+                                            st.warning("¡Legajo rechazado y notificado a la escuela correctamente!")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Error: {res_rec.get('message')}")
+                                    except Exception as e:
+                                        st.error(f"Error de conexión: {e}")
 
 # ---------------------------------------------------------
 # 4. GESTIÓN DE PAGOS Y RECAUDACIÓN
