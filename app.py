@@ -1,10 +1,10 @@
 import streamlit as st
 import requests
 import pandas as pd
-import base64
+import io
 
 st.set_page_config(
-    page_title="Panel de Secretaría - Modelos ONU",
+    page_title="Panel de Secretaría ANUAR - Modelos ONU",
     page_icon="👑",
     layout="wide"
 )
@@ -22,20 +22,19 @@ def api_get(action, params=""):
     except Exception:
         return []
 
-import io
-
+# Función para generar un archivo Excel real (.xlsx) descargable mediante botón nativo
 def descargar_excel_real(df, nombre_archivo):
     output = io.BytesIO()
-    # Usamos pandas con el motor openpyxl para generar un Excel real y limpio
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Reporte')
     processed_data = output.getvalue()
     
-    return st.download_button(
+    st.download_button(
         label=f"📥 Descargar {nombre_archivo} en Excel (.xlsx)",
         data=processed_data,
         file_name=f"{nombre_archivo}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"btn_{nombre_archivo}"
     )
 
 st.title("👑 Panel de Control - Secretaría / Administración")
@@ -114,7 +113,7 @@ with tab_dash:
     if delegaciones:
         df_del = pd.DataFrame(delegaciones)
         st.dataframe(df_del, use_container_width=True)
-        st.markdown(descargar_excel_html(df_del, "escuelas_preinscriptas"), unsafe_allow_html=True)
+        descargar_excel_real(df_del, "escuelas_preinscriptas")
     else:
         st.info("No hay delegaciones registradas todavía.")
 
@@ -171,7 +170,7 @@ with tab_ficha:
         else:
             df_alumnos = pd.DataFrame(alumnos_escuela)
             st.dataframe(df_alumnos[["id_asignacion", "rol_mnu", "nombre", "apellido", "dni", "alergias_medicas"]], use_container_width=True)
-            st.markdown(descargar_excel_html(df_alumnos, f"nomina_{id_del}"), unsafe_allow_html=True)
+            descargar_excel_real(df_alumnos, f"nomina_{id_del}")
 
 # ---------------------------------------------------------
 # 3. GESTIÓN DE PAGOS Y RECAUDACIÓN
@@ -220,7 +219,7 @@ with tab_pagos:
             
             st.metric("Total Recaudado (Pagos Aprobados)", f"${total_recaudado:,.2f}")
             st.dataframe(df_pagos, use_container_width=True)
-            st.markdown(descargar_excel_html(df_pagos, "historial_pagos"), unsafe_allow_html=True)
+            descargar_excel_real(df_pagos, "historial_pagos")
         else:
             st.info("No hay registros de pagos cargados.")
 
@@ -248,6 +247,6 @@ with tab_medicos:
             st.warning(f"⚠️ Se encontraron {len(alerta_nominas)} participantes con observaciones médicas:")
             df_alertas = pd.DataFrame(alerta_nominas)
             st.dataframe(df_alertas[["id_delegacion", "nombre", "apellido", "dni", "rol_mnu", "alergias_medicas"]], use_container_width=True)
-            st.markdown(descargar_excel_html(df_alertas, "reporte_alertas_medicas"), unsafe_allow_html=True)
+            descargar_excel_real(df_alertas, "reporte_alertas_medicas")
     else:
         st.info("No hay participantes cargados en las nóminas todavía.")
