@@ -22,11 +22,21 @@ def api_get(action, params=""):
     except Exception:
         return []
 
-def descargar_excel_html(df, nombre_archivo):
-    html = df.to_html(index=False)
-    b64 = base64.b64encode(html.encode("utf-8")).decode("utf-8")
-    href = f'<a href="data:application/vnd.ms-excel;base64,{b64}" download="{nombre_archivo}.xls">📥 Descargar {nombre_archivo} en Excel</a>'
-    return href
+import io
+
+def descargar_excel_real(df, nombre_archivo):
+    output = io.BytesIO()
+    # Usamos pandas con el motor openpyxl para generar un Excel real y limpio
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reporte')
+    processed_data = output.getvalue()
+    
+    return st.download_button(
+        label=f"📥 Descargar {nombre_archivo} en Excel (.xlsx)",
+        data=processed_data,
+        file_name=f"{nombre_archivo}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 st.title("👑 Panel de Control - Secretaría / Administración")
 
