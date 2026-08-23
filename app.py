@@ -306,46 +306,45 @@ with tab_pagos:
         else:
             st.info("No hay registros de pagos cargados.")
 
-# 5. PAÍSES Y BANCAS (CON SEPARACIÓN DE ASIGNADOS Y DISPONIBLES)
+# 5. PAÍSES Y BANCAS (FILTRADO DIRECTO DESDE LA SOLAPA ORGANOS)
 with tab_paises:
     st.subheader("🌍 Control de Disponibilidad de Órganos y Países")
     
     try:
-        res_full_asig = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion=").json()
-        tabla_bancas = res_full_asig.get("data", [])
+        res_orgs = requests.get(f"{API_URL}?action=GET_ORGANOS_GENERAL").json()
+        tabla_organos = res_orgs.get("data", [])
         
-        if tabla_bancas:
-            df_bancas = pd.DataFrame(tabla_bancas).astype(str)
+        if tabla_organos:
+            df_orgs = pd.DataFrame(tabla_organos).astype(str)
             
-            # Filtramos los que están sin asignar (id_delegacion_asignada vacío, '-', o nulo)
-            sin_asignar = df_bancas[
-                df_bancas['id_delegacion_asignada'].str.strip().isin(["", "-", "nan", "None"]) | 
-                df_bancas['id_delegacion_asignada'].isna()
+            sin_asignar_orgs = df_orgs[
+                df_orgs['id_asignacion'].str.strip().isin(["", "-", "nan", "None"]) | 
+                df_orgs['id_asignacion'].isna()
             ]
             
-            asignados = df_bancas[
-                ~df_bancas['id_delegacion_asignada'].str.strip().isin(["", "-", "nan", "None"]) & 
-                df_bancas['id_delegacion_asignada'].notna()
+            asignados_orgs = df_orgs[
+                ~df_orgs['id_asignacion'].str.strip().isin(["", "-", "nan", "None"]) & 
+                df_orgs['id_asignacion'].notna()
             ]
 
-            st.markdown(f"### 🟢 Países y Bancas Disponibles (Sin Asignar): `{len(sin_asignar)}`")
-            if not sin_asignar.empty:
-                st.dataframe(sin_asignar[["id_asignacion", "organo", "pais", "id_modelo"]], use_container_width=True)
-                descargar_csv_para_excel(sin_asignar, "paises_disponibles_sin_asignar")
+            st.markdown(f"### 🟢 Países y Bancas Disponibles / Sin Asignar (Solapa Organos): `{len(sin_asignar_orgs)}`")
+            if not sin_asignar_orgs.empty:
+                st.dataframe(sin_asignar_orgs[["id_modelo", "organo_comite", "pais", "integrantes"]], use_container_width=True)
+                descargar_csv_para_excel(sin_asignar_orgs, "paises_disponibles_organos")
             else:
-                st.success("🎉 ¡No hay países libres! Todas las bancas se encuentran asignadas.")
+                st.success("🎉 ¡No hay países libres en la solapa Organos! Todos tienen asignación.")
 
             st.markdown("---")
-            st.markdown(f"### 🔒 Países y Bancas Ya Asignadas: `{len(asignados)}`")
-            if not asignados.empty:
-                st.dataframe(asignados, use_container_width=True)
-                descargar_csv_para_excel(asignados, "paises_asignados")
+            st.markdown(f"### 🔒 Países y Bancas Asignadas: `{len(asignados_orgs)}`")
+            if not asignados_orgs.empty:
+                st.dataframe(asignados_orgs, use_container_width=True)
+                descargar_csv_para_excel(asignados_orgs, "paises_asignados_organos")
             else:
-                st.info("Aún no hay instituciones con países asignados.")
+                st.info("Aún no hay registros con ID de asignación en la solapa Organos.")
         else:
-            st.info("No hay registros de asignaciones cargados todavía.")
+            st.info("No se encontraron datos en la solapa Organos de tu Google Sheet.")
     except Exception as e:
-        st.error(f"Error al cargar la disponibilidad de países: {e}")
+        st.error(f"Error al cargar el control de órganos: {e}")
 
 # 6. ALERTAS MÉDICAS
 with tab_medicos:
