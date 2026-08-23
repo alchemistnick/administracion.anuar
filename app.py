@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 # URL DE LA API DE APPS SCRIPT ACTUALIZADA
-API_URL = "https://script.google.com/macros/s/AKfycbyII4nyjSmpkku1ys1MgUNu_p071hIf9c2PpihRj0t3r4pGBSH7Ma47qUsmIk0NfUu1mQ/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbxVDRWF11W-M6b7MxNo5D1zBjEa361eToBKwlxuVTpnauRfDvw1R39SLjkFCPbL7xXhbQ/exec"
 
 def api_get(action, params=""):
     try:
