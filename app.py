@@ -12,6 +12,7 @@ st.set_page_config(
 # URL DE LA API DE APPS SCRIPT
 API_URL = "https://script.google.com/macros/s/AKfycbzetBeBzqAeJLzcLoU6mqbRmwi26JRqC0iAGR9KjoxnhHfvuL47RsLx1CL9axo1lvPgWg/exec"
 
+@st.cache_data(ttl=30)
 def api_get(action, params=""):
     try:
         url = f"{API_URL}?action={action}{params}"
@@ -22,17 +23,17 @@ def api_get(action, params=""):
     except Exception:
         return []
 
-# Exportación a Excel con motor openpyxl (nativo y seguro)
+# Función para exportar DataFrame directamente a formato Excel (.xlsx) descargable
 def convertir_a_excel(df):
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Reporte')
     processed_data = output.getvalue()
     return processed_data
 
 st.title("👑 Panel de Control - Secretaría / Administración")
 
-# Selección de Modelo (Única carga inicial ligera)
+# Selección de Modelo
 modelos = api_get("GET_MODELOS_ACTIVOS")
 if not modelos:
     st.warning("⚠️ No hay modelos activos configurados.")
@@ -54,15 +55,16 @@ menu_admin = st.sidebar.radio(
     ]
 )
 
+# Cargar datos globales filtrados por modelo
+delegaciones = api_get("GET_TODAS_DELEGACIONES", f"&id_modelo={id_modelo_actual}")
+pagos_pendientes = api_get("GET_PAGOS_PENDIENTES")
+nominas = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
+
 # ---------------------------------------------------------
-# 1. DASHBOARD Y KPIS (Solo carga delegaciones al entrar aquí)
+# 1. DASHBOARD Y KPIS
 # ---------------------------------------------------------
 if menu_admin == "📊 Dashboard y KPIs":
     st.subheader(f"📊 Panel General - {modelo_seleccionado}")
-    
-    delegaciones = api_get("GET_TODAS_DELEGACIONES", f"&id_modelo={id_modelo_actual}")
-    nominas = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
-    pagos = api_get("GET_PAGOS_PENDIENTES")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -73,7 +75,7 @@ if menu_admin == "📊 Dashboard y KPIs":
     with col3:
         st.metric("Estudiantes en Nómina", len(nominas))
     with col4:
-        st.metric("Pagos Pendientes", len(pagos))
+        st.metric("Pagos Pendientes", len(pagos_pendientes))
 
     st.markdown("---")
     st.markdown("### 📋 Listado Rápido de Instituciones")
@@ -81,6 +83,7 @@ if menu_admin == "📊 Dashboard y KPIs":
         df_del = pd.DataFrame(delegaciones)
         st.dataframe(df_del, use_container_width=True)
         
+        # Botón de exportación a Excel real (.xlsx)
         st.download_button(
             label="📥 Descargar Listado de Escuelas en Excel",
             data=convertir_a_excel(df_del),
@@ -91,13 +94,12 @@ if menu_admin == "📊 Dashboard y KPIs":
         st.info("No hay delegaciones registradas todavía.")
 
 # ---------------------------------------------------------
-# 2. FICHA NOMINAL POR ESCUELA (Consulta específica al abrir)
+# 2. FICHA NOMINAL POR ESCUELA (CONTROL DETALLADO)
 # ---------------------------------------------------------
 elif menu_admin == "🏫 Ficha Nominal por Escuela":
     st.subheader("🏫 Ficha Integral por Institución")
-    
-    delegaciones = api_get("GET_TODAS_DELEGACIONES", f"&id_modelo={id_modelo_actual}")
-    
+    st.markdown("Seleccioná o buscá una escuela para ver su estado, contactos, cupos, contraseña de acceso, pagos, bancas asignadas y alumnos cargados.")
+
     if not delegaciones:
         st.info("No hay escuelas registradas.")
     else:
@@ -120,7 +122,7 @@ elif menu_admin == "🏫 Ficha Nominal por Escuela":
             st.markdown(f"**📱 Teléfono Celular:** {escuela.get('docente_telefono')}")
         with col_f3:
             st.markdown(f"**📊 Cupos Solicitados:** {escuela.get('cupos_solicitados')}")
-            st.markdown(f"**🔑 Clave de Acceso (Plataforma):** `{escuela.get('secret_hash')}`")
+            st.markdown(f"**🔑 Contraseña Secreta:** `{escuela.get('secret_hash')}`") # Recuperada visible
             estado_doc = escuela.get('estado', 'REGISTRADO')
             st.markdown(f"**📌 Estado Documentación:** `{estado_doc}`")
 
@@ -139,8 +141,7 @@ elif menu_admin == "🏫 Ficha Nominal por Escuela":
         st.markdown("---")
 
         st.markdown("### 👥 Estudiantes Registrados en Nómina")
-        nominas_todas = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
-        alumnos_escuela = [n for n in nominas_todas if str(n.get("id_delegacion")).strip().upper() == str(id_del).strip().upper()]
+        alumnos_escuela = [n for n in nominas if str(n.get("id_delegacion")).strip().upper() == str(id_del).strip().upper()]
         
         if not alumnos_escuela:
             st.info("La escuela aún no ha cargado participantes en su nómina.")
@@ -155,15 +156,16 @@ elif menu_admin == "🏫 Ficha Nominal por Escuela":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
+        st.markdown("---")
+        st.markdown("💡 *Tip para secretariado: Copia la contraseña o el correo del docente de arriba para comunicarte ante cualquier inconveniente técnico o documental.*")
+
 # ---------------------------------------------------------
-# 3. GESTIÓN DE PAGOS Y RECAUDACIÓN (Consulta específica)
+# 3. GESTIÓN DE PAGOS Y RECAUDACIÓN
 # ---------------------------------------------------------
 elif menu_admin == "💰 Gestión de Pagos y Recaudación":
     st.subheader("💰 Gestión de Comprobantes y Recaudación")
     
-    pagos_pendientes = api_get("GET_PAGOS_PENDIENTES")
-    
-    tab1, tab2 = st.tabs(["⏳ Pagos Pendientes", "✅ Historial y Acumulador"])
+    tab1, tab2 = st.tabs(["⏳ Pagos Pendientes", "✅ Pagos Aprobados y Recaudación"])
     
     with tab1:
         st.markdown("### Comprobantes a Revisar")
@@ -197,23 +199,23 @@ elif menu_admin == "💰 Gestión de Pagos y Recaudación":
                     st.markdown("---")
 
     with tab2:
-        st.markdown("### Resumen y Acumulador de Recaudación")
-        st.info("💡 Aquí podés auditar el flujo de ingresos de las inscripciones.")
+        st.markdown("### Historial de Pagos y Acumulador General")
+        st.info("💡 Aquí se listan los pagos registrados en el sistema. Asegúrate de verificar cada monto acreditado.")
 
 # ---------------------------------------------------------
 # 4. PAÍSES Y BANCAS DISPONIBLES
 # ---------------------------------------------------------
 elif menu_admin == "🌍 Países y Bancas Disponibles":
     st.subheader("🌍 Control de Disponibilidad de Órganos y Países")
-    st.markdown("💡 **Cómo verificar:** En tu Google Sheet, dirigite a la solapa **`Organos`**. Aquellas filas cuya **Columna E (`id_asignacion`)** aparezca con un guion `"-"` indican que ese país u órgano todavía **no ha sido asignado** a ninguna institución, por lo que se encuentra libre para sortear.")
+    st.markdown("Información detallada sobre el estado de asignación de los cupos oficiales.")
+
+    st.info("💡 **Cómo verificar:** En tu Google Sheet, dirigite a la solapa **`Organos`**. Aquellas filas cuya **Columna E (`id_asignacion`)** aparezca con un guion `"-"` indican que ese país u órgano todavía **no ha sido asignado** a ninguna institución, por lo que se encuentra libre para sortear.")
 
 # ---------------------------------------------------------
 # 5. ALERTAS MÉDICAS
 # ---------------------------------------------------------
 elif menu_admin == "🩺 Alertas Médicas":
     st.subheader("🩺 Reporte General de Salud y Alergias")
-    
-    nominas = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
     
     if nominas:
         alerta_nominas = [n for n in nominas if n.get("alergias_medicas") and str(n.get("alergias_medicas")).strip().lower() not in ["ninguna", "-", ""]]
