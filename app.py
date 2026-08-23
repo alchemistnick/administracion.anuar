@@ -8,8 +8,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# URL DE LA API DE APPS SCRIPT ACTUALIZADA
-API_URL = "https://script.google.com/macros/s/AKfycbxVDRWF11W-M6b7MxNo5D1zBjEa361eToBKwlxuVTpnauRfDvw1R39SLjkFCPbL7xXhbQ/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbx3zjc_Ub_OiItFksgr7VfSI19RduFZPS--SSQ3l4qQJi8qi-w4FXCNmy3xIlZsq3x0KQ/exec"
 
 def api_get(action, params=""):
     try:
@@ -22,7 +21,8 @@ def api_get(action, params=""):
         return []
 
 def descargar_csv_para_excel(df, nombre_archivo):
-    csv = df.to_csv(index=False).encode('utf-8-sig')
+    df_clean = df.astype(str)
+    csv = df_clean.to_csv(index=False).encode('utf-8-sig')
     return st.download_button(
         label=f"📥 Descargar {nombre_archivo} (Compatible con Excel)",
         data=csv,
@@ -33,9 +33,6 @@ def descargar_csv_para_excel(df, nombre_archivo):
 
 st.title("👑 Panel de Control - Secretaría / Administración")
 
-# ---------------------------------------------------------
-# AUTENTICACIÓN ADMINISTRATIVA
-# ---------------------------------------------------------
 if "admin_logueado" not in st.session_state:
     st.session_state["admin_logueado"] = False
 
@@ -58,7 +55,6 @@ if st.sidebar.button("Cerrar Sesión Admin"):
     st.session_state["admin_logueado"] = False
     st.rerun()
 
-# Selección de Modelo
 modelos = api_get("GET_MODELOS_ACTIVOS")
 if not modelos:
     st.warning("⚠️ No hay modelos activos configurados.")
@@ -70,9 +66,6 @@ id_modelo_actual = dict_modelos[modelo_seleccionado]
 
 st.sidebar.markdown("---")
 
-# ---------------------------------------------------------
-# NAVEGACIÓN POR PESTAÑAS (TABS)
-# ---------------------------------------------------------
 tab_dash, tab_ficha, tab_auditoria, tab_pagos, tab_paises, tab_medicos = st.tabs([
     "📊 Dashboard y KPIs", 
     "🏫 Ficha Nominal por Escuela", 
@@ -82,42 +75,33 @@ tab_dash, tab_ficha, tab_auditoria, tab_pagos, tab_paises, tab_medicos = st.tabs
     "🩺 Alertas Médicas"
 ])
 
-# ---------------------------------------------------------
-# 1. DASHBOARD Y KPIS
-# ---------------------------------------------------------
+# 1. DASHBOARD
 with tab_dash:
     st.subheader(f"📊 Panel General - {modelo_seleccionado}")
-    
     delegaciones = api_get("GET_TODAS_DELEGACIONES", f"&id_modelo={id_modelo_actual}")
     nominas = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
     pagos = api_get("GET_PAGOS_PENDIENTES")
     
     col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Escuelas Registradas", len(delegaciones))
+    with col1: st.metric("Escuelas Registradas", len(delegaciones))
     with col2:
         docs_completas = sum(1 for d in delegaciones if str(d.get("estado")).upper() in ["DOCUMENTACION_COMPLETA", "APROBADO_FINAL"])
         st.metric("Doc. Completa / Aprobada", docs_completas)
-    with col3:
-        st.metric("Estudiantes en Nómina", len(nominas))
-    with col4:
-        st.metric("Pagos Pendientes", len(pagos))
+    with col3: st.metric("Estudiantes en Nómina", len(nominas))
+    with col4: st.metric("Pagos Pendientes", len(pagos))
 
     st.markdown("---")
     st.markdown("### 📋 Listado Rápido de Instituciones")
     if delegaciones:
-        df_del = pd.DataFrame(delegaciones)
+        df_del = pd.DataFrame(delegaciones).astype(str)
         st.dataframe(df_del, use_container_width=True)
         descargar_csv_para_excel(df_del, "escuelas_preinscriptas")
     else:
         st.info("No hay delegaciones registradas todavía.")
 
-# ---------------------------------------------------------
-# 2. FICHA NOMINAL POR ESCUELA
-# ---------------------------------------------------------
+# 2. FICHA NOMINAL
 with tab_ficha:
     st.subheader("🏫 Ficha Integral por Institución")
-    
     delegaciones_ficha = api_get("GET_TODAS_DELEGACIONES", f"&id_modelo={id_modelo_actual}")
     
     if not delegaciones_ficha:
@@ -126,10 +110,9 @@ with tab_ficha:
         opciones_escuelas = {f"[{d.get('id_delegacion')}] {d.get('nombre_colegio')}": d for d in delegaciones_ficha}
         escuela_label = st.selectbox("Seleccionar Institución:", list(opciones_escuelas.keys()), key="select_escuela_ficha")
         escuela = opciones_escuelas[escuela_label]
-
         id_del = escuela.get("id_delegacion")
+
         st.markdown("---")
-        
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
             st.markdown(f"**🏛️ Institución:** {escuela.get('nombre_colegio')}")
@@ -163,17 +146,13 @@ with tab_ficha:
         if not alumnos_escuela:
             st.info("La escuela aún no ha cargado participantes en su nómina.")
         else:
-            df_alumnos = pd.DataFrame(alumnos_escuela)
+            df_alumnos = pd.DataFrame(alumnos_escuela).astype(str)
             st.dataframe(df_alumnos[["id_asignacion", "rol_mnu", "nombre", "apellido", "dni", "alergias_medicas"]], use_container_width=True)
             descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
 
-# ---------------------------------------------------------
-# 3. MÓDULO DE AUDITORÍA Y APROBACIÓN / RECHAZO FINAL
-# ---------------------------------------------------------
+# 3. AUDITORÍA
 with tab_auditoria:
     st.subheader("🔍 Auditoría de Documentación y Aprobación Final")
-    st.markdown("Revisá los alumnos cargados por la escuela, verificá sus fichas y autorizaciones en Drive, y tomá una decisión sobre el legajo.")
-
     delegaciones_aud = api_get("GET_TODAS_DELEGACIONES", f"&id_modelo={id_modelo_actual}")
     
     if not delegaciones_aud:
@@ -213,15 +192,10 @@ with tab_auditoria:
                         st.write("📝 Autorización: No adjunta")
                 st.markdown("---")
 
-            # Botonera de Decisión
             col_btn1, col_btn2 = st.columns(2)
-            
             with col_btn1:
                 if st.button(f"✅ Aprobar Legajo Completo", key=f"btn_aprobar_{id_del_aud}", use_container_width=True):
-                    payload_aprobacion = {
-                        "action": "APROBAR_LEGAJO_ESCUELA",
-                        "data": {"id_delegacion": id_del_aud}
-                    }
+                    payload_aprobacion = {"action": "APROBAR_LEGAJO_ESCUELA", "data": {"id_delegacion": id_del_aud}}
                     with st.spinner("Aprobando legajo y enviando correo..."):
                         try:
                             res_ap = requests.post(API_URL, json=payload_aprobacion).json()
@@ -234,7 +208,6 @@ with tab_auditoria:
                             st.error(f"Error de conexión: {e}")
 
             with col_btn2:
-                # Botón desplegable / Expander para el formulario de rechazo con motivo
                 with st.expander("❌ Rechazar Legajo con Observaciones"):
                     with st.form(key=f"form_rechazo_{id_del_aud}"):
                         motivo_rechazo = st.text_area("Indique el motivo del rechazo o corrección necesaria:")
@@ -246,10 +219,7 @@ with tab_auditoria:
                             else:
                                 payload_rechazo = {
                                     "action": "RECHAZAR_LEGAJO_ESCUELA",
-                                    "data": {
-                                        "id_delegacion": id_del_aud,
-                                        "motivo": motivo_rechazo
-                                    }
+                                    "data": {"id_delegacion": id_del_aud, "motivo": motivo_rechazo}
                                 }
                                 with st.spinner("Procesando rechazo y enviando correo..."):
                                     try:
@@ -262,17 +232,13 @@ with tab_auditoria:
                                     except Exception as e:
                                         st.error(f"Error de conexión: {e}")
 
-# ---------------------------------------------------------
-# 4. GESTIÓN DE PAGOS Y RECAUDACIÓN
-# ---------------------------------------------------------
+# 4. PAGOS
 with tab_pagos:
     st.subheader("💰 Gestión de Comprobantes y Recaudación")
-    
     pagos_pendientes = api_get("GET_PAGOS_PENDIENTES")
     pagos_todos = api_get("GET_TODOS_PAGOS")
     
     subtab1, subtab2 = st.tabs(["⏳ Pagos Pendientes", "✅ Historial de Pagos y Acumulador"])
-    
     with subtab1:
         if not pagos_pendientes:
             st.success("🎉 ¡No hay pagos pendientes de revisión!")
@@ -286,8 +252,7 @@ with tab_pagos:
                         st.write(f"**Monto Informado:** ${p.get('monto')}")
                     with col_p2:
                         url_comp = p.get('drive_file_url')
-                        if url_comp:
-                            st.markdown(f"🔗 [Ver Comprobante en Drive]({url_comp})", unsafe_allow_html=True)
+                        if url_comp: st.markdown(f"🔗 [Ver Comprobante en Drive]({url_comp})", unsafe_allow_html=True)
                         st.write(f"**Estado:** `{p.get('estado_pago')}`")
                     with col_p3:
                         if st.button("Aprobar", key=f"ap_{p.get('id_pago')}"):
@@ -303,9 +268,9 @@ with tab_pagos:
     with subtab2:
         st.markdown("### Resumen de Recaudación")
         if pagos_todos:
-            df_pagos = pd.DataFrame(pagos_todos)
-            pagos_aprobados = df_pagos[df_pagos['estado_pago'].astype(str).str.upper() == 'APROBADO']
-            total_recaudado = pagos_aprobados['monto'].sum() if not pagos_aprobados.empty else 0
+            df_pagos = pd.DataFrame(pagos_todos).astype(str)
+            pagos_aprobados = df_pagos[df_pagos['estado_pago'].str.upper() == 'APROBADO']
+            total_recaudado = pagos_aprobados['monto'].astype(float).sum() if not pagos_aprobados.empty else 0
             
             st.metric("Total Recaudado (Pagos Aprobados)", f"${total_recaudado:,.2f}")
             st.dataframe(df_pagos, use_container_width=True)
@@ -313,29 +278,23 @@ with tab_pagos:
         else:
             st.info("No hay registros de pagos cargados.")
 
-# ---------------------------------------------------------
-# 5. PAÍSES Y BANCAS DISPONIBLES
-# ---------------------------------------------------------
+# 5. PAÍSES Y BANCAS
 with tab_paises:
     st.subheader("🌍 Control de Disponibilidad de Órganos y Países")
     st.write("En tu Google Sheet, dirigite a la solapa Organos. Aquellas filas cuya Columna E (id_asignacion) aparezca con un guion '-' indican que ese país u órgano todavía no ha sido asignado a ninguna institución.")
 
-# ---------------------------------------------------------
 # 6. ALERTAS MÉDICAS
-# ---------------------------------------------------------
 with tab_medicos:
     st.subheader("🩺 Reporte General de Salud y Alergias")
-    
     nominas_medicas = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
     
     if nominas_medicas:
         alerta_nominas = [n for n in nominas_medicas if n.get("alergias_medicas") and str(n.get("alergias_medicas")).strip().lower() not in ["ninguna", "-", ""]]
-        
         if not alerta_nominas:
             st.success("✅ No hay alertas médicas registradas.")
         else:
             st.warning(f"⚠️ Se encontraron {len(alerta_nominas)} participantes con observaciones médicas:")
-            df_alertas = pd.DataFrame(alerta_nominas)
+            df_alertas = pd.DataFrame(alerta_nominas).astype(str)
             st.dataframe(df_alertas[["id_delegacion", "nombre", "apellido", "dni", "rol_mnu", "alergias_medicas"]], use_container_width=True)
             descargar_csv_para_excel(df_alertas, "reporte_alertas_medicas")
     else:
