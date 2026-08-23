@@ -87,7 +87,7 @@ with tab_dash:
     with col2:
         docs_completas = sum(1 for d in delegaciones if str(d.get("estado")).upper() in ["DOCUMENTACION_COMPLETA", "APROBADO_FINAL"])
         st.metric("Doc. Completa / Aprobada", docs_completas)
-    with col3: st.metric("Estudiantes en Nómina", len(nominas))
+    with col3: st.metric("Participantes en Nómina", len(nominas))
     with col4: st.metric("Pagos Pendientes", len(pagos))
 
     st.markdown("---")
@@ -139,10 +139,20 @@ with tab_ficha:
                 st.write(f"- **{b.get('organo')}** — País: **{b.get('pais')}** (ID Asignación: `{b.get('id_asignacion')}`)")
 
         st.markdown("---")
-        st.markdown("### 👥 Estudiantes Registrados en Nómina")
+        st.markdown("### 👨‍🏫 Docentes Acompañantes Registrados")
         nominas_todas = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
-        alumnos_escuela = [n for n in nominas_todas if str(n.get("id_delegacion")).strip().upper() == str(id_del).strip().upper()]
+        registros_escuela = [n for n in nominas_todas if str(n.get("id_delegacion")).strip().upper() == str(id_del).strip().upper()]
         
+        docentes_escuela = [r for r in registros_escuela if r.get("rol_mnu") == "Docente Acompañante"]
+        alumnos_escuela = [r for r in registros_escuela if r.get("rol_mnu") != "Docente Acompañante"]
+
+        if not docentes_escuela:
+            st.info("La escuela aún no ha registrado docentes acompañantes.")
+        else:
+            for doc in docentes_escuela:
+                st.write(f"- **{doc.get('nombre')} {doc.get('apellido')}** (DNI: {doc.get('dni')}) — {doc.get('alergias_medicas')}")
+
+        st.markdown("### 👥 Estudiantes Registrados en Nómina")
         if not alumnos_escuela:
             st.info("La escuela aún no ha cargado participantes en su nómina.")
         else:
@@ -168,28 +178,29 @@ with tab_auditoria:
         st.write(f"**Estado actual:** `{escuela_aud.get('estado', 'REGISTRADO')}`")
 
         nominas_todas_aud = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
-        alumnos_aud = [n for n in nominas_todas_aud if str(n.get("id_delegacion")).strip().upper() == str(id_del_aud).strip().upper()]
+        registros_aud = [n for n in nominas_todas_aud if str(n.get("id_delegacion")).strip().upper() == str(id_del_aud).strip().upper()]
 
-        if not alumnos_aud:
+        if not registros_aud:
             st.warning("⚠️ Esta escuela todavía no ha cargado participantes en su nómina.")
         else:
-            st.markdown("### 📋 Nómina y Enlaces a Documentos en Drive")
-            for idx, alum in enumerate(alumnos_aud):
-                st.markdown(f"**{idx+1}. {alum.get('nombre')} {alum.get('apellido')}** (DNI: {alum.get('dni')}) — *Banca:* {alum.get('rol_mnu')}")
+            st.markdown("### 📋 Nómina Completa y Enlaces a Documentos en Drive")
+            for idx, reg in enumerate(registros_aud):
+                rol_txt = reg.get('rol_mnu')
+                st.markdown(f"**{idx+1}. {reg.get('nombre')} {reg.get('apellido')}** (DNI: {reg.get('dni')}) — *Rol/Banca:* {rol_txt}")
                 
                 col_enla1, col_enla2 = st.columns(2)
                 with col_enla1:
-                    ficha_id = alum.get('ficha_medica_id') or alum.get('ficha_id') or "-"
+                    ficha_id = reg.get('ficha_medica_id') or "-"
                     if ficha_id and ficha_id != "-":
-                        st.markdown(f"📄 [Ver Ficha Médica en Drive](https://drive.google.com/open?id={ficha_id})", unsafe_allow_html=True)
+                        st.markdown(f"📄 [Ver Ficha / Constancia en Drive](https://drive.google.com/open?id={ficha_id})", unsafe_allow_html=True)
                     else:
-                        st.write("📄 Ficha Médica: No adjunta")
+                        st.write("📄 Documento 1: No adjunto")
                 with col_enla2:
-                    aut_id = alum.get('autorizacion_id') or alum.get('aut_id') or "-"
+                    aut_id = reg.get('autorizacion_id') or "-"
                     if aut_id and aut_id != "-":
                         st.markdown(f"📝 [Ver Autorización en Drive](https://drive.google.com/open?id={aut_id})", unsafe_allow_html=True)
                     else:
-                        st.write("📝 Autorización: No adjunta")
+                        st.write("📝 Documento 2: No adjunto")
                 st.markdown("---")
 
             col_btn1, col_btn2 = st.columns(2)
@@ -236,7 +247,7 @@ with tab_auditoria:
 with tab_pagos:
     st.subheader("💰 Gestión de Comprobantes y Recaudación")
     pagos_pendientes = api_get("GET_PAGOS_PENDIENTES")
-    pagos_todos = api_get("GET_TODOS_PAGOS")
+    pagos_todos = api_get("GET_TODAS_PAGOS")
     
     subtab1, subtab2 = st.tabs(["⏳ Pagos Pendientes", "✅ Historial de Pagos y Acumulador"])
     with subtab1:
@@ -293,7 +304,7 @@ with tab_medicos:
         if not alerta_nominas:
             st.success("✅ No hay alertas médicas registradas.")
         else:
-            st.warning(f"⚠️ Se encontraron {len(alerta_nominas)} participantes con observaciones médicas:")
+            st.warning(f"⚠️ Se encontraron {len(alerta_nominas)} registros con observaciones médicas o de contacto:")
             df_alertas = pd.DataFrame(alerta_nominas).astype(str)
             st.dataframe(df_alertas[["id_delegacion", "nombre", "apellido", "dni", "rol_mnu", "alergias_medicas"]], use_container_width=True)
             descargar_csv_para_excel(df_alertas, "reporte_alertas_medicas")
