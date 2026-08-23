@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 # URL DE LA API DE APPS SCRIPT ACTUALIZADA
-API_URL = "https://script.google.com/macros/s/AKfycbzetBeBzqAeJLzcLoU6mqbRmwi26JRqC0iAGR9KjoxnhHfvuL47RsLx1CL9axo1lvPgWg/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbxMsoNWVYS9CJRHSj22s25ivYY6ITSK6vj059JmjDKb_YMr0Qy8GyLQx3fQqQWf7PwJHA/exec"
 
 def api_get(action, params=""):
     try:
@@ -22,7 +22,6 @@ def api_get(action, params=""):
         return []
 
 def descargar_csv_para_excel(df, nombre_archivo):
-    # Convertimos a CSV con codificación utf-8-sig para que Excel reconozca eñes y tildes perfectamente
     csv = df.to_csv(index=False).encode('utf-8-sig')
     return st.download_button(
         label=f"📥 Descargar {nombre_archivo} (Compatible con Excel)",
@@ -72,11 +71,12 @@ id_modelo_actual = dict_modelos[modelo_seleccionado]
 st.sidebar.markdown("---")
 
 # ---------------------------------------------------------
-# NAVEGACIÓN POR PESTAÑAS (TABS)
+# NAVEGACIÓN POR PESTAÑAS (TABS) - CON MÓDULO DE AUDITORÍA NUEVO
 # ---------------------------------------------------------
-tab_dash, tab_ficha, tab_pagos, tab_paises, tab_medicos = st.tabs([
+tab_dash, tab_ficha, tab_auditoria, tab_pagos, tab_paises, tab_medicos = st.tabs([
     "📊 Dashboard y KPIs", 
     "🏫 Ficha Nominal por Escuela", 
+    "🔍 Auditoría y Aprobación Final",
     "💰 Gestión de Pagos", 
     "🌍 Países y Bancas", 
     "🩺 Alertas Médicas"
@@ -96,8 +96,8 @@ with tab_dash:
     with col1:
         st.metric("Escuelas Registradas", len(delegaciones))
     with col2:
-        docs_completas = sum(1 for d in delegaciones if str(d.get("estado")).upper() == "DOCUMENTACION_COMPLETA")
-        st.metric("Documentación Completa", docs_completas)
+        docs_completas = sum(1 for d in delegaciones if str(d.get("estado")).upper() in ["DOCUMENTACION_COMPLETA", "APROBADO_FINAL"])
+        st.metric("Doc. Completa / Aprobada", docs_completas)
     with col3:
         st.metric("Estudiantes en Nómina", len(nominas))
     with col4:
@@ -168,7 +168,72 @@ with tab_ficha:
             descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
 
 # ---------------------------------------------------------
-# 3. GESTIÓN DE PAGOS Y RECAUDACIÓN
+# 3. NUEVO MÓDULO: AUDITORÍA Y APROBACIÓN FINAL DE LEGAJOS
+# ---------------------------------------------------------
+with tab_auditoria:
+    st.subheader("🔍 Auditoría de Documentación y Aprobación Final")
+    st.markdown("Revisá los alumnos cargados por la escuela, verificá sus fichas y autorizaciones en Google Drive, y aprobá formalmente la delegación para enviarle el resumen por correo.")
+
+    delegaciones_aud = api_get("GET_TODAS_DELEGACIONES", f"&id_modelo={id_modelo_actual}")
+    
+    if not delegaciones_aud:
+        st.info("No hay escuelas registradas.")
+    else:
+        opc_aud = {f"[{d.get('id_delegacion')}] {d.get('nombre_colegio')} (Estado: {d.get('estado')})": d for d in delegaciones_aud}
+        sel_aud_label = st.selectbox("Seleccionar Institución a Auditar:", list(opc_aud.keys()), key="select_auditoria")
+        escuela_aud = opc_aud[sel_aud_label]
+        id_del_aud = escuela_aud.get("id_delegacion")
+
+        st.markdown("---")
+        st.write(f"**Institución:** {escuela_aud.get('nombre_colegio')} | **Docente:** {escuela_aud.get('docente_apellido_nombre')} ({escuela_aud.get('docente_email')})")
+        st.write(f"**Estado actual:** `{escuela_aud.get('estado', 'REGISTRADO')}`")
+
+        nominas_todas_aud = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
+        alumnos_aud = [n for n in nominas_todas_aud if str(n.get("id_delegacion")).strip().upper() == str(id_del_aud).strip().upper()]
+
+        if not alumnos_aud:
+            st.warning("⚠️ Esta escuela todavía no ha cargado participantes en su nómina.")
+        else:
+            st.markdown("### 📋 Nómina y Enlaces a Documentos en Drive")
+            for idx, alum in enumerate(alumnos_aud):
+                st.markdown(f"**{idx+1}. {alum.get('nombre')} {alum.get('apellido')}** (DNI: {alum.get('dni')}) — *Banca:* {alum.get('rol_mnu')}")
+                
+                col_enla1, col_enla2 = st.columns(2)
+                with col_enla1:
+                    ficha_id = alum.get('ficha_medica_id') or alum.get('ficha_id') or "-"
+                    if ficha_id and ficha_id != "-":
+                        st.markdown(f"📄 [Ver Ficha Médica en Drive](https://drive.google.com/open?id={ficha_id})", unsafe_allow_html=True)
+                    else:
+                        st.write("📄 Ficha Médica: No adjunta")
+                with col_enla2:
+                    aut_id = alum.get('autorizacion_id') or alum.get('aut_id') or "-"
+                    if aut_id and aut_id != "-":
+                        st.markdown(f"📝 [Ver Autorización en Drive](https://drive.google.com/open?id={aut_id})", unsafe_allow_html=True)
+                    else:
+                        st.write("📝 Autorización: No adjunta")
+                st.markdown("---")
+
+            # Botón de Aprobación Final
+            if st.button(f"✅ Aprobar Legajo Completo y Enviar Resumen por Mail", key=f"btn_aprobar_{id_del_aud}"):
+                payload_aprobacion = {
+                    "action": "APROBAR_LEGAJO_ESCUELA",
+                    "data": {
+                        "id_delegacion": id_del_aud
+                    }
+                }
+                with st.spinner("Aprobando legajo y enviando correo con el totalizador..."):
+                    try:
+                        res_ap = requests.post(API_URL, json=payload_aprobacion).json()
+                        if res_ap.get("status") == "SUCCESS":
+                            st.success("¡Legajo aprobado con éxito! Se le envió un correo automático a la escuela con el resumen totalizador.")
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {res_ap.get('message')}")
+                    except Exception as e:
+                        st.error(f"Error de conexión: {e}")
+
+# ---------------------------------------------------------
+# 4. GESTIÓN DE PAGOS Y RECAUDACIÓN
 # ---------------------------------------------------------
 with tab_pagos:
     st.subheader("💰 Gestión de Comprobantes y Recaudación")
@@ -219,14 +284,14 @@ with tab_pagos:
             st.info("No hay registros de pagos cargados.")
 
 # ---------------------------------------------------------
-# 4. PAÍSES Y BANCAS DISPONIBLES
+# 5. PAÍSES Y BANCAS DISPONIBLES
 # ---------------------------------------------------------
 with tab_paises:
     st.subheader("🌍 Control de Disponibilidad de Órganos y Países")
     st.write("En tu Google Sheet, dirigite a la solapa Organos. Aquellas filas cuya Columna E (id_asignacion) aparezca con un guion '-' indican que ese país u órgano todavía no ha sido asignado a ninguna institución.")
 
 # ---------------------------------------------------------
-# 5. ALERTAS MÉDICAS
+# 6. ALERTAS MÉDICAS
 # ---------------------------------------------------------
 with tab_medicos:
     st.subheader("🩺 Reporte General de Salud y Alergias")
@@ -234,7 +299,7 @@ with tab_medicos:
     nominas_medicas = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
     
     if nominas_medicas:
-        alerta_nominas = [n for n in nominas_medicas if n.get("alergias_medicas") and str(n.get("alergias_medicas")).strip().lower() not in ["ninguna", "-", ""]]
+        alerta_nominas = [n for n in nominas_medicas if n.get("alergias_medicas"] and str(n.get("alergias_medicas")).strip().lower() not in ["ninguna", "-", ""]]
         
         if not alerta_nominas:
             st.success("✅ No hay alertas médicas registradas.")
