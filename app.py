@@ -9,7 +9,8 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbz-_CGcnnLW3nsh-EQPZ4CkLzTZvkuK1tLTAXw1D49MpynEqbigCqwEMoGyL5ft8ZTqlA/exec"
+# URL DE LA NUEVA IMPLEMENTACIÓN DE APPS SCRIPT
+API_URL = "https://script.google.com/macros/s/AKfycbybpH8ByPnhJycsXgZI5Xf-wDHdBLI0pZwfdbq0xo2Q6RAypxgUcEaeW3IwZ6uq_pY8SQ/exec"
 
 @st.cache_data(ttl=60)
 def cargar_modelos_activos():
@@ -98,34 +99,95 @@ if admin_pass == "Secretaria2026":
     # ---------------------------------------------------------
     elif menu == "1. Revisión de Pagos y Modificaciones":
         st.subheader(f"Auditoría General - {modelo_seleccionado}")
-        tab_pagos, tab_modificaciones = st.tabs(["💳 Comprobantes de Pago", "✏️ Solicitudes de Cambio de Cupos"])
+        tab_pagos, tab_modificaciones = st.tabs(["💳 Comprobantes de Pago PENDIENTES", "✏️ Solicitudes de Cambio de Cupos"])
         
         with tab_pagos:
             try:
-                res = requests.get(f"{API_URL}?action=GET_PAGOS_PENDIENTES").json()
-                pagos = res.get("data", [])
-                pagos_filtrados = [p for p in pagos if p.get("id_modelo") == id_modelo_actual or not p.get("id_modelo")]
+                res_pagos = requests.get(f"{API_URL}?action=GET_PAGOS_PENDIENTES").json()
+                pagos = res_pagos.get("data", [])
+                
+                escuelas = cargar_escuelas_aprobadas_cached(id_modelo_actual)
+                mapa_escuelas = {str(e.get("id_delegacion")).strip().upper(): e for e in escuelas if e.get("id_delegacion")}
+
+                pagos_filtrados = [p for p in pagos if str(p.get("id_modelo", "")).strip() == id_modelo_actual or not p.get("id_modelo")]
                 
                 if not pagos_filtrados:
-                    st.success(f"No hay comprobantes pendientes para {modelo_seleccionado}.")
+                    st.success(f"🎉 No hay comprobantes pendientes de revisión para {modelo_seleccionado}.")
                 else:
                     for pago in pagos_filtrados:
-                        with st.expander(f"💳 Pago {pago.get('id_pago', '-')} | Delegación: {pago.get('id_delegacion', '-')} | Monto: ${pago.get('monto', 0)}"):
-                            col_a, col_b = st.columns([2, 1])
-                            with col_a:
-                                st.write(f"**Fecha:** {pago.get('fecha_subida', '-')}")
+                        id_pago = str(pago.get('id_pago', '-')).strip()
+                        id_del = str(pago.get('id_delegacion', '-')).strip().upper()
+                        monto = pago.get('monto', 0)
+                        
+                        datos_escuela = mapa_escuelas.get(id_del, {})
+                        nombre_colegio = datos_escuela.get("nombre_colegio", "Escuela no identificada")
+                        docente_resp = datos_escuela.get("docente_apellido_nombre", datos_escuela.get("docente_cargo", "No informado"))
+                        docente_email = datos_escuela.get("docente_email", datos_escuela.get("email_contacto", "-"))
+                        docente_tel = datos_escuela.get("docente_telefono", datos_escuela.get("telefono_contacto", "-"))
+                        cupos_pedidos = datos_escuela.get("cupos_solicitados", 0)
+                        desglose_pedidos = datos_escuela.get("desglose_modalidades", "No especificado")
+                        docentes_acomp = datos_escuela.get("docentes_acompanantes", 1)
+
+                        with st.expander(f"💳 {id_pago} | {nombre_colegio} ({id_del}) — Monto Subido: ${monto:,.2f}"):
+                            st.markdown("##### 📄 Resumen de la Preinscripción Solicitada:")
+                            
+                            col_info1, col_info2 = st.columns(2)
+                            with col_info1:
+                                st.write(f"• **Institución:** {nombre_colegio}")
+                                st.write(f"• **Docente Responsable:** {docente_resp}")
+                                st.write(f"• **Contacto:** 📧 {docente_email} | 📞 {docente_tel}")
+                            
+                            with col_info2:
+                                st.write(f"• **Cupos Solicitados:** {cupos_pedidos} estudiantes")
+                                st.write(f"• **Docentes Acompañantes:** {docentes_acomp}")
+                                st.write(f"• **Desglose Solicitado:** `{desglose_pedidos}`")
+
+                            st.markdown("---")
+                            
+                            col_b1, col_b2 = st.columns([2, 1])
+                            with col_b1:
+                                st.write(f"**Fecha de Envío:** {pago.get('fecha_subida', '-')}")
                                 if pago.get('drive_file_url') and pago['drive_file_url'] != "-":
-                                    st.markdown(f"[📄 **Ver Comprobante**]({pago['drive_file_url']})", unsafe_allow_html=True)
-                            with col_b:
-                                if st.button("✅ APROBAR PAGO", key=f"app_{pago.get('id_pago')}"):
-                                    payload = {"action": "CAMBIAR_ESTADO_PAGO", "usuario": "ADMIN", "data": {"id_pago": pago.get('id_pago'), "nuevo_estado": "APROBADO"}}
-                                    r = requests.post(API_URL, json=payload).json()
-                                    if r.get("status") == "SUCCESS":
-                                        st.cache_data.clear()
-                                        st.success("Aprobado")
-                                        st.rerun()
+                                    st.markdown(f"[📄 **ABRIR COMPROBANTE DE PAGO (DRIVE)**]({pago['drive_file_url']})", unsafe_allow_html=True)
+                                else:
+                                    st.warning("Sin archivo adjunto.")
+
+                            with col_b2:
+                                btn_aprobar = st.button("✅ APROBAR PAGO", key=f"btn_app_{id_pago}")
+                                btn_rechazar = st.button("❌ RECHAZAR PAGO", key=f"btn_rej_{id_pago}")
+
+                                if btn_aprobar:
+                                    payload = {
+                                        "action": "CAMBIAR_ESTADO_PAGO", 
+                                        "usuario": "ADMIN", 
+                                        "data": {"id_pago": id_pago, "nuevo_estado": "APROBADO"}
+                                    }
+                                    with st.spinner("Aprobando pago..."):
+                                        r = requests.post(API_URL, json=payload).json()
+                                        if r.get("status") == "SUCCESS":
+                                            st.cache_data.clear()
+                                            st.success(f"¡Pago {id_pago} aprobado exitosamente!")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Error: {r.get('message')}")
+
+                                if btn_rechazar:
+                                    payload = {
+                                        "action": "CAMBIAR_ESTADO_PAGO", 
+                                        "usuario": "ADMIN", 
+                                        "data": {"id_pago": id_pago, "nuevo_estado": "RECHAZADO"}
+                                    }
+                                    with st.spinner("Rechazando pago..."):
+                                        r = requests.post(API_URL, json=payload).json()
+                                        if r.get("status") == "SUCCESS":
+                                            st.cache_data.clear()
+                                            st.info(f"Pago {id_pago} marcado como rechazado.")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Error: {r.get('message')}")
+
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Error al cargar la solapa de pagos: {e}")
 
         with tab_modificaciones:
             try:
