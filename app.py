@@ -246,24 +246,37 @@ with tab_auditoria:
 # 4. PAGOS
 with tab_pagos:
     st.subheader("💰 Gestión de Comprobantes y Recaudación")
+    
+    # Traemos las delegaciones para hacer el cruce y mostrar el nombre del colegio
+    delegaciones_pagos = api_get("GET_TODAS_DELEGACIONES")
+    mapa_colegios = {d.get("id_delegacion"): d.get("nombre_colegio") for d in delegaciones_pagos}
+    mapa_responsables = {d.get("id_delegacion"): d.get("docente_apellido_nombre") for d in delegaciones_pagos}
+
     pagos_pendientes = api_get("GET_PAGOS_PENDIENTES")
-    pagos_todos = api_get("GET_TODAS_PAGOS")
+    pagos_todos = api_get("GET_TODOS_PAGOS")
     
     subtab1, subtab2 = st.tabs(["⏳ Pagos Pendientes", "✅ Historial de Pagos y Acumulador"])
+    
     with subtab1:
         if not pagos_pendientes:
             st.success("🎉 ¡No hay pagos pendientes de revisión!")
         else:
             for p in pagos_pendientes:
+                id_del = p.get('id_delegacion')
+                nombre_escuela = mapa_colegios.get(id_del, "Institución Desconocida")
+                responsable = mapa_responsables.get(id_del, "-")
+
                 with st.container():
                     col_p1, col_p2, col_p3 = st.columns([2, 2, 1])
                     with col_p1:
-                        st.write(f"**ID Pago:** {p.get('id_pago')}")
-                        st.write(f"**Delegación:** {p.get('id_delegacion')}")
-                        st.write(f"**Monto Informado:** ${p.get('monto')}")
+                        st.write(f"**ID Pago:** `{p.get('id_pago')}`")
+                        st.write(f"**🏛️ Institución:** {nombre_escuela} (`{id_del}`)")
+                        st.write(f"**👤 Responsable:** {responsable}")
+                        st.write(f"**💵 Monto Informado:** **${p.get('monto')}**")
                     with col_p2:
                         url_comp = p.get('drive_file_url')
-                        if url_comp: st.markdown(f"🔗 [Ver Comprobante en Drive]({url_comp})", unsafe_allow_html=True)
+                        if url_comp: 
+                            st.markdown(f"🔗 [Ver Comprobante en Drive]({url_comp})", unsafe_allow_html=True)
                         st.write(f"**Estado:** `{p.get('estado_pago')}`")
                     with col_p3:
                         if st.button("Aprobar", key=f"ap_{p.get('id_pago')}"):
@@ -280,11 +293,18 @@ with tab_pagos:
         st.markdown("### Resumen de Recaudación")
         if pagos_todos:
             df_pagos = pd.DataFrame(pagos_todos).astype(str)
+            # Agregamos una columna con el nombre del colegio para que aparezca claro en la tabla y en el CSV
+            df_pagos['nombre_colegio'] = df_pagos['id_delegacion'].map(mapa_colegios).fillna("Desconocido")
+            
+            # Reordenamos columnas para que el nombre del colegio quede visible al principio
+            cols = ['id_pago', 'id_delegacion', 'nombre_colegio', 'monto', 'estado_pago', 'fecha_subida']
+            cols_disponibles = [c for c in cols if c in df_pagos.columns]
+            
             pagos_aprobados = df_pagos[df_pagos['estado_pago'].str.upper() == 'APROBADO']
             total_recaudado = pagos_aprobados['monto'].astype(float).sum() if not pagos_aprobados.empty else 0
             
             st.metric("Total Recaudado (Pagos Aprobados)", f"${total_recaudado:,.2f}")
-            st.dataframe(df_pagos, use_container_width=True)
+            st.dataframe(df_pagos[cols_disponibles], use_container_width=True)
             descargar_csv_para_excel(df_pagos, "historial_pagos")
         else:
             st.info("No hay registros de pagos cargados.")
