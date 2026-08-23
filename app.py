@@ -8,7 +8,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbzF4ouR-7Z6fEkT9W4df9nTEWLKyC8uS-PqE-xfm1JdW459GRFoxRkEVAx0Zb-5bSZVPQ/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbzbPKv-DdELuHy2FugQ3s6ZENEU1gUwFiDaK05r2t6qaqaUND7bmNqfwOsePnPNYb_hJQ/exec"
 
 def api_get(action, params=""):
     try:
@@ -253,7 +253,7 @@ with tab_pagos:
     mapa_responsables = {d.get("id_delegacion"): d.get("docente_apellido_nombre") for d in delegaciones_pagos}
 
     pagos_pendientes = api_get("GET_PAGOS_PENDIENTES")
-    pagos_todos = api_get("GET_TODOS_PAGOS")
+    pagos_todos = api_get("GET_TODAS_PAGOS")
     
     subtab1, subtab2 = st.tabs(["⏳ Pagos Pendientes", "✅ Historial de Pagos y Acumulador"])
     
@@ -364,11 +364,11 @@ with tab_medicos:
     else:
         st.info("No hay participantes cargados en las nóminas todavía.")
 
-# 7. CONTROL DE ACREDITACIÓN
+# 7. CONTROL DE ACREDITACIÓN (FILTRADO POR MODELO ACTUAL)
 with tab_acred:
-    st.subheader("🎫 Control de Acreditaciones en Tiempo Real")
+    st.subheader(f"🎫 Control de Acreditaciones - {modelo_seleccionado}")
     try:
-        res_acred = requests.get(f"{API_URL}?action=GET_ESTADISTICAS_ACREDITACION").json()
+        res_acred = requests.get(f"{API_URL}?action=GET_ESTADISTICAS_ACREDITACION&id_modelo={id_modelo_actual}").json()
         if res_acred.get("status") == "SUCCESS":
             d_acred = res_acred.get("data", {})
             col_a1, col_a2, col_a3 = st.columns(3)
@@ -377,13 +377,13 @@ with tab_acred:
             with col_a3: st.metric("Porcentaje de Acreditación", f"{d_acred.get('porcentaje', 0)}%")
             
             st.markdown("---")
-            st.markdown("### ❌ Participantes Pendientes de Acreditación (Ausentes)")
+            st.markdown("### ❌ Participantes Pendientes de Acreditación (Ausentes en este Modelo)")
             no_acred = d_acred.get("no_acreditados", [])
             if no_acred:
                 df_no = pd.DataFrame(no_acred).astype(str)
                 st.dataframe(df_no[["id_delegacion", "nombre", "apellido", "dni", "rol_mnu"]], use_container_width=True)
-                descargar_csv_para_excel(df_no, "participantes_pendientes_acreditacion")
+                descargar_csv_para_excel(df_no, f"pendientes_acreditacion_{id_modelo_actual}")
             else:
-                st.success("🎉 ¡Todos los participantes se encuentran acreditados!")
+                st.success("🎉 ¡Todos los participantes de este modelo se encuentran acreditados!")
     except Exception as e:
         st.error(f"Error al cargar estadísticas de acreditación: {e}")
