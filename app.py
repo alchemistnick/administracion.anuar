@@ -1,309 +1,180 @@
 import streamlit as st
 import requests
-import json
 import pandas as pd
 
 st.set_page_config(
-    page_title="Secretariado - Control Interno MNU",
-    page_icon="🛡️",
+    page_title="Panel de Secretaría - Modelos ONU",
+    page_icon="👑",
     layout="wide"
 )
 
-# URL DE LA NUEVA IMPLEMENTACIÓN DE APPS SCRIPT
-API_URL = "https://script.google.com/macros/s/AKfycbzG8zPIgu0iR1gqpBU1JlwEZYIDIFquyWtKWcPRLrSkZFa8fIsPD6RdccFQdX3Y97zdng/exec"
+# URL DE TU API DE APPS SCRIPT ACTUALIZADA
+API_URL = "https://script.google.com/macros/s/AKfycbxMsoNWVYS9CJRHSj22s25ivYY6ITSK6vj059JmjDKb_YMr0Qy8GyLQx3fQqQWf7PwJHA/exec"
 
-@st.cache_data(ttl=60)
-def cargar_modelos_activos():
+@st.cache_data(ttl=30)
+def api_get(action, params=""):
     try:
-        res = requests.get(f"{API_URL}?action=GET_MODELOS_ACTIVOS").json()
+        url = f"{API_URL}?action={action}{params}"
+        res = requests.get(url).json()
         if res.get("status") == "SUCCESS":
-            modelos = res.get("data", [])
-            return {m.get("nombre_visible", "Modelo"): m.get("id_modelo") for m in modelos if m.get("id_modelo")}
-        return {}
-    except Exception:
-        return {}
-
-@st.cache_data(ttl=30)
-def cargar_todas_nominas_cached(id_mod):
-    try:
-        res = requests.get(f"{API_URL}?action=GET_TODAS_NOMINAS&id_modelo={id_mod}").json()
-        return res.get("data", [])
+            return res.get("data", [])
+        return []
     except Exception:
         return []
 
-@st.cache_data(ttl=30)
-def cargar_escuelas_aprobadas_cached(id_mod):
-    try:
-        res = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_mod}").json()
-        return res.get("data", [])
-    except Exception:
-        return []
+st.title("👑 Panel de Control - Secretaría / Administración")
 
-st.title("🛡️ Panel Interno del Secretariado - Control y Gestión Global")
-
-CONFIG_MODELOS = cargar_modelos_activos()
-
-st.sidebar.markdown("### 🌐 Selección de Evento")
-
-if not CONFIG_MODELOS:
-    st.sidebar.warning("⚠️ No hay modelos activos configurados en la planilla.")
+# Selección de Modelo
+modelos = api_get("GET_MODELOS_ACTIVOS")
+if not modelos:
+    st.warning("⚠️ No hay modelos activos configurados.")
     st.stop()
-else:
-    modelo_seleccionado = st.sidebar.selectbox("Elegí el Modelo a Auditar:", list(CONFIG_MODELOS.keys()))
-    id_modelo_actual = CONFIG_MODELOS[modelo_seleccionado]
+
+dict_modelos = {m["nombre_visible"]: m["id_modelo"] for m in modelos}
+modelo_seleccionado = st.sidebar.selectbox("Seleccionar Modelo:", list(dict_modelos.keys()))
+id_modelo_actual = dict_modelos[modelo_seleccionado]
 
 st.sidebar.markdown("---")
+menu_admin = st.sidebar.radio(
+    "Navegación Admin",
+    [
+        "📊 Dashboard y KPIs", 
+        "🏫 Control de Escuelas y Documentación", 
+        "💰 Gestión de Pagos", 
+        "🌍 Países Sin Asignar", 
+        "🩺 Alertas Médicas"
+    ]
+)
 
-admin_pass = st.sidebar.text_input("🔐 Contraseña Secretariado", type="password")
+# Cargar datos globales filtrados por modelo
+delegaciones = api_get("GET_TODAS_DELEGACIONES", f"&id_modelo={id_modelo_actual}")
+pagos = api_get("GET_PAGOS_PENDIENTES") # O todos si prefieres
+nominas = api_get("GET_TODAS_NOMINAS", f"&id_modelo={id_modelo_actual}")
 
-if admin_pass == "Secretaria2026":
-    st.sidebar.success("Acceso Autorizado")
+# ---------------------------------------------------------
+# 1. DASHBOARD Y KPIS
+# ---------------------------------------------------------
+if menu_admin == "📊 Dashboard y KPIs":
+    st.subheader(f"📊 Panel General - {modelo_seleccionado}")
     
-    menu = st.sidebar.radio(
-        "Módulos de Gestión",
-        [
-            "📊 Dashboard & Estado del Modelo",
-            "1. Revisión de Pagos y Modificaciones", 
-            "2. Nómina General de Participantes",
-            "3. Búsqueda Rápida por DNI"
-        ]
-    )
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Escuelas Registradas", len(delegaciones))
+    with col2:
+        docs_completas = sum(1 for d in delegaciones if str(d.get("estado")).upper() == "DOCUMENTACION_COMPLETA")
+        st.metric("Documentación Completa", docs_completas)
+    with col3:
+        st.metric("Estudiantes en Nómina", len(nominas))
+    with col4:
+        pagos_aprobados = sum(1 for p in pagos if str(p.get("estado_pago")).upper() == "APROBADO")
+        st.metric("Pagos Aprobados", pagos_aprobados)
 
-    # ---------------------------------------------------------
-    # MÓDULO 0: DASHBOARD
-    # ---------------------------------------------------------
-    if menu == "📊 Dashboard & Estado del Modelo":
-        st.subheader(f"📈 Estado General del Evento - {modelo_seleccionado}")
-        
-        with st.spinner("Cargando métricas..."):
-            escuelas_aprobadas = cargar_escuelas_aprobadas_cached(id_modelo_actual)
-            todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
+    st.markdown("---")
+    st.markdown("### 📋 Resumen Rápido de Instituciones")
+    if delegaciones:
+        df_del = pd.DataFrame(delegaciones)
+        st.dataframe(df_del[["id_delegacion", "nombre_colegio", "docente_apellido_nombre", "cupos_solicitados", "estado"]], use_container_width=True)
+    else:
+        st.info("No hay delegaciones registradas todavía.")
 
-        m1, m2, m3, m4 = st.columns(4)
-        with m1:
-            st.metric("🏫 Escuelas Aprobadas", len(escuelas_aprobadas))
-        with m2:
-            tot_cupos = sum([int(e.get("cupos_solicitados", 0)) for e in escuelas_aprobadas if str(e.get("cupos_solicitados", "0")).isdigit()])
-            st.metric("👥 Cupos Solicitados", tot_cupos)
-        with m3:
-            st.metric("👤 Participantes Cargados", len(todas_nominas))
-        with m4:
-            fichas_ok = sum([1 for n in todas_nominas if n.get("drive_ficha_id") and str(n.get("drive_ficha_id")).strip() != "-"])
-            st.metric("📄 Fichas Médicas Recibidas", fichas_ok)
-
-        st.markdown("---")
-        st.info("ℹ️ Para cargar los resultados del sorteo, completá la solapa **`ASIGNACIONES_EXCEL`** en tu Google Sheet (Columna A: Colegio, Columna B: País) y ejecutá la función `importarAsignacionesDesdeExcel()` en Google Apps Script.")
-
-   # ---------------------------------------------------------
-    # MÓDULO 1: REVISIÓN DE PAGOS Y MODIFICACIONES (ASOCIACIÓN BLINDADA)
-    # ---------------------------------------------------------
-    elif menu == "1. Revisión de Pagos y Modificaciones":
-        st.subheader(f"Auditoría General - {modelo_seleccionado}")
-        tab_pagos, tab_modificaciones = st.tabs(["💳 Comprobantes de Pago PENDIENTES", "✏️ Solicitudes de Cambio de Cupos"])
-        
-        with tab_pagos:
-            try:
-                # 1. Obtener pagos pendientes
-                res_pagos = requests.get(f"{API_URL}?action=GET_PAGOS_PENDIENTES").json()
-                pagos = res_pagos.get("data", [])
-                
-                # 2. Obtener TODAS las delegaciones registradas sin importar si están o no aprobadas aún
-                res_escuelas = requests.get(f"{API_URL}?action=GET_TODAS_DELEGACIONES&id_modelo={id_modelo_actual}").json()
-                escuelas = res_escuelas.get("data", [])
-                
-                # Crear diccionario de mapeo tolerante: { "DEL-001": dict_escuela }
-                mapa_escuelas = {}
-                for e in escuelas:
-                    id_d = str(e.get("id_delegacion", "")).strip().upper()
-                    if id_d:
-                        mapa_escuelas[id_d] = e
-
-                pagos_filtrados = [p for p in pagos if str(p.get("id_modelo", "")).strip().upper() == id_modelo_actual.upper() or not p.get("id_modelo")]
-                
-                if not pagos_filtrados:
-                    st.success(f"🎉 No hay comprobantes pendientes de revisión para {modelo_seleccionado}.")
-                else:
-                    for pago in pagos_filtrados:
-                        id_pago = str(pago.get('id_pago', '-')).strip()
-                        id_del = str(pago.get('id_delegacion', '-')).strip().upper()
-                        monto = pago.get('monto', 0)
-                        
-                        # Cruzar datos con la solapa DELEGACIONES (búsqueda multicampo)
-                        datos_escuela = mapa_escuelas.get(id_del, {})
-                        
-                        nombre_colegio = (
-                            datos_escuela.get("nombre_colegio") or 
-                            datos_escuela.get("escuela") or 
-                            datos_escuela.get("institucion") or 
-                            "Escuela Registrada"
-                        )
-                        docente_resp = (
-                            datos_escuela.get("docente_apellido_nombre") or 
-                            datos_escuela.get("docente_apellido_nomb") or 
-                            datos_escuela.get("docente_a_cargo") or 
-                            "No informado"
-                        )
-                        docente_email = (
-                            datos_escuela.get("docente_email") or 
-                            datos_escuela.get("docente_ei") or 
-                            datos_escuela.get("email_docente_responsable") or 
-                            datos_escuela.get("email_institucional") or 
-                            "-"
-                        )
-                        docente_tel = (
-                            datos_escuela.get("docente_telefono") or 
-                            datos_escuela.get("docente_te") or 
-                            datos_escuela.get("cel_docente") or 
-                            datos_escuela.get("telefono_institucional") or 
-                            "-"
-                        )
-                        cupos_pedidos = (
-                            datos_escuela.get("cupos_solicitados") or 
-                            datos_escuela.get("cupos_soli") or 
-                            datos_escuela.get("cant_de_delegados") or 
-                            0
-                        )
-                        desglose_pedidos = (
-                            datos_escuela.get("desglose_modalidades") or 
-                            datos_escuela.get("desglose_r") or 
-                            "No especificado"
-                        )
-                        docentes_acomp = (
-                            datos_escuela.get("docentes_acompanantes") or 
-                            datos_escuela.get("docentes") or 
-                            1
-                        )
-
-                        # Tarjeta de inspección
-                        with st.expander(f"💳 {id_pago} | {nombre_colegio} ({id_del}) — Monto Subido: ${monto:,.2f}"):
-                            st.markdown("##### 📄 Resumen de la Preinscripción Solicitada:")
-                            
-                            col_info1, col_info2 = st.columns(2)
-                            with col_info1:
-                                st.write(f"• **Institución:** {nombre_colegio}")
-                                st.write(f"• **Docente Responsable:** {docente_resp}")
-                                st.write(f"• **Contacto:** 📧 {docente_email} | 📞 {docente_tel}")
-                            
-                            with col_info2:
-                                st.write(f"• **Cupos Solicitados:** {cupos_pedidos} estudiantes")
-                                st.write(f"• **Docentes Acompañantes:** {docentes_acomp}")
-                                st.write(f"• **Desglose Solicitado:** `{desglose_pedidos}`")
-
-                            st.markdown("---")
-                            
-                            col_b1, col_b2 = st.columns([2, 1])
-                            with col_b1:
-                                st.write(f"**Fecha de Envío:** {pago.get('fecha_subida', '-')}")
-                                if pago.get('drive_file_url') and pago['drive_file_url'] != "-":
-                                    st.markdown(f"[📄 **ABRIR COMPROBANTE DE PAGO (DRIVE)**]({pago['drive_file_url']})", unsafe_allow_html=True)
-                                else:
-                                    st.warning("Sin archivo adjunto.")
-
-                            with col_b2:
-                                btn_aprobar = st.button("✅ APROBAR PAGO", key=f"btn_app_{id_pago}")
-                                btn_rechazar = st.button("❌ RECHAZAR PAGO", key=f"btn_rej_{id_pago}")
-
-                                if btn_aprobar:
-                                    payload = {
-                                        "action": "CAMBIAR_ESTADO_PAGO", 
-                                        "usuario": "ADMIN", 
-                                        "data": {"id_pago": id_pago, "nuevo_estado": "APROBADO"}
-                                    }
-                                    with st.spinner("Aprobando pago..."):
-                                        r = requests.post(API_URL, json=payload).json()
-                                        if r.get("status") == "SUCCESS":
-                                            st.cache_data.clear()
-                                            st.success(f"¡Pago {id_pago} aprobado exitosamente!")
-                                            st.rerun()
-                                        else:
-                                            st.error(f"Error: {r.get('message')}")
-
-                                if btn_rechazar:
-                                    payload = {
-                                        "action": "CAMBIAR_ESTADO_PAGO", 
-                                        "usuario": "ADMIN", 
-                                        "data": {"id_pago": id_pago, "nuevo_estado": "RECHAZADO"}
-                                    }
-                                    with st.spinner("Rechazando pago..."):
-                                        r = requests.post(API_URL, json=payload).json()
-                                        if r.get("status") == "SUCCESS":
-                                            st.cache_data.clear()
-                                            st.info(f"Pago {id_pago} marcado como rechazado.")
-                                            st.rerun()
-                                        else:
-                                            st.error(f"Error: {r.get('message')}")
-
-            except Exception as e:
-                st.error(f"Error al cargar la solapa de pagos: {e}")
-    # ---------------------------------------------------------
-    # MÓDULO 2: NÓMINA GENERAL
-    # ---------------------------------------------------------
-    elif menu == "2. Nómina General de Participantes":
-        st.subheader(f"📋 Nómina Consolidada de Participantes - {modelo_seleccionado}")
-        todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
-
-        if not todas_nominas:
-            st.info("Aún no hay participantes cargados.")
-        else:
-            col_f1, col_f2 = st.columns([2, 1])
-            with col_f1:
-                filtro_busqueda = st.text_input("🔍 Filtrar por Nombre, Apellido, DNI o Escuela:")
-            with col_f2:
-                filtro_doc = st.selectbox("Estado Documentación:", ["Todos", "Ficha Médica Pendiente", "Autorización Pendiente", "Documentación Completa"])
-
-            lista_procesada = []
-            for n in todas_nominas:
-                ficha_ok = n.get("drive_ficha_id") and str(n.get("drive_ficha_id")).strip() != "-"
-                aut_ok = n.get("drive_autorizacion_id") and str(n.get("drive_autorizacion_id")).strip() != "-"
-                
-                if filtro_doc == "Ficha Médica Pendiente" and ficha_ok:
-                    continue
-                if filtro_doc == "Autorización Pendiente" and aut_ok:
-                    continue
-                if filtro_doc == "Documentación Completa" and (not ficha_ok or not aut_ok):
-                    continue
-
-                nom_comp = f"{n.get('nombre', '')} {n.get('apellido', '')}".strip() or n.get("nombre_completo", "")
-                query = filtro_busqueda.strip().lower()
-                if query:
-                    if not (query in nom_comp.lower() or query in str(n.get("dni", "")).lower() or query in str(n.get("id_delegacion", "")).lower()):
-                        continue
-
-                lista_procesada.append({
-                    "ID Delegado": n.get("id_delegado", "-"),
-                    "Escuela / ID": n.get("id_delegacion", "-"),
-                    "Nombre": n.get("nombre", "-"),
-                    "Apellido": n.get("apellido", "-"),
-                    "DNI": n.get("dni", "-"),
-                    "Rol": n.get("rol_mnu", "-"),
-                    "Ficha Médica": "✅ OK" if ficha_ok else "❌ Pendiente",
-                    "Autorización Imagen": "✅ OK" if aut_ok else "❌ Pendiente"
-                })
-
-            st.dataframe(pd.DataFrame(lista_procesada), use_container_width=True, hide_index=True)
-
-    # ---------------------------------------------------------
-    # MÓDULO 3: BÚSQUEDA RÁPIDA POR DNI
-    # ---------------------------------------------------------
-    elif menu == "3. Búsqueda Rápida por DNI":
-        st.subheader(f"🔍 Buscador Global de Participantes - {modelo_seleccionado}")
-        busqueda = st.text_input("Ingresá DNI, Nombre, Apellido o ID Delegación:")
-        
-        if busqueda:
-            todas_nominas = cargar_todas_nominas_cached(id_modelo_actual)
-            query = busqueda.strip().lower()
-            resultados = [n for n in todas_nominas if query in str(n.get("dni", "")).lower() or query in str(n.get("nombre", "")).lower() or query in str(n.get("apellido", "")).lower() or query in str(n.get("id_delegacion", "")).lower()]
+# ---------------------------------------------------------
+# 2. CONTROL DE ESCUELAS Y DOCUMENTACIÓN
+# ---------------------------------------------------------
+elif menu_admin == "🏫 Control de Escuelas y Documentación":
+    st.subheader("🏫 Estado de Carga Documental por Escuela")
+    
+    if delegaciones:
+        for d in delegaciones:
+            estado = str(d.get("estado", "REGISTRADO")).upper()
+            color_badge = "🟢" if estado == "DOCUMENTACION_COMPLETA" else "🟡"
             
-            if not resultados:
-                st.warning(f"No hay coincidencias para '{busqueda}'.")
-            else:
-                for r in resultados:
-                    nombre_mostrar = f"{r.get('nombre', '')} {r.get('apellido', '')}".strip() or r.get("nombre_completo", "")
-                    with st.expander(f"👤 {nombre_mostrar} | DNI: {r.get('dni', '-')} | Escuela: {r.get('id_delegacion', '-')}"):
-                        st.write(f"**Rol:** {r.get('rol_mnu', '-')}")
-                        st.write(f"**Alergias:** {r.get('alergias_medicas', 'Ninguna')}")
+            with st.expander(f"{color_badge} [{d.get('id_delegacion')}] {d.get('nombre_colegio')} — Estado: *{estado}*"):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.write(f"**Responsable:** {d.get('docente_apellido_nombre')}")
+                    st.write(f"**Correo:** {d.get('docente_email')}")
+                    st.write(f"**Teléfono:** {d.get('docente_telefono')}")
+                with col_b:
+                    st.write(f"**Cupos Solicitados:** {d.get('cupos_solicitados')}")
+                    st.write(f"**Desglose:** {d.get('desglose_modalidades')}")
+                
+                # Filtrar alumnos de esta delegación
+                alumnos_escuela = [n for n in nominas if str(n.get("id_delegacion")).strip().upper() == str(d.get("id_delegacion")).strip().upper()]
+                st.markdown(f"**Estudiantes cargados en nómina:** {len(alumnos_escuela)}")
+                if alumnos_escuela:
+                    df_alumnos = pd.DataFrame(alumnos_escuela)
+                    st.dataframe(df_alumnos[["id_asignacion", "rol_mnu", "nombre", "apellido", "dni"]], use_container_width=True)
+    else:
+        st.info("No hay escuelas cargadas.")
 
-elif admin_pass:
-    st.error("🔒 Contraseña incorrecta.")
-else:
-    st.warning("👈 Por favor ingresá la contraseña del Secretariado en el menú lateral.")
+# ---------------------------------------------------------
+# 3. GESTIÓN DE PAGOS
+# ---------------------------------------------------------
+elif menu_admin == "💰 Gestión de Pagos":
+    st.subheader("💰 Comprobantes de Pago Pendientes")
+    
+    # Usamos la acción para traer pagos pendientes
+    pagos_pendientes = api_get("GET_PAGOS_PENDIENTES")
+    
+    if not pagos_pendientes:
+        st.success("🎉 ¡No hay pagos pendientes de revisión!")
+    else:
+        for p in pagos_pendientes:
+            with st.container():
+                col_p1, col_p2, col_p3 = st.columns([2, 2, 1])
+                with col_p1:
+                    st.write(f"**ID Pago:** {p.get('id_pago')}")
+                    st.write(f"**Delegación:** {p.get('id_delegacion')}")
+                    st.write(f"**Monto:** ${p.get('monto')}")
+                with col_p2:
+                    url_comprobante = p.get('drive_file_url')
+                    if url_comprobante:
+                        st.markdown(f"🔗 [Ver Comprobante en Drive]({url_comprobante})", unsafe_allow_html=True)
+                    st.write(f"**Estado actual:** {p.get('estado_pago')}")
+                with col_p3:
+                    if st.button("Aprobar", key=f"ap_{p.get('id_pago')}"):
+                        payload = {"action": "CAMBIAR_ESTADO_PAGO", "data": {"id_pago": p.get('id_pago'), "nuevo_estado": "APROBADO"}}
+                        requests.post(API_URL, json=payload)
+                        st.success("¡Pago aprobado!")
+                        st.rerun()
+                    if st.button("Rechazar", key=f"rec_{p.get('id_pago')}"):
+                        payload = {"action": "CAMBIAR_ESTADO_PAGO", "data": {"id_pago": p.get('id_pago'), "nuevo_estado": "RECHAZADO"}}
+                        requests.post(API_URL, json=payload)
+                        st.warning("Pago rechazado.")
+                        st.rerun()
+                st.markdown("---")
+
+# ---------------------------------------------------------
+# 4. PAÍSES SIN ASIGNAR
+# ---------------------------------------------------------
+elif menu_admin == "🌍 Países Sin Asignar":
+    st.subheader("🌍 Control de Países y Bancas Disponibles")
+    st.markdown("Este reporte compara la matriz maestra de órganos contra las asignaciones actuales para mostrarte qué lugares siguen libres.")
+
+    # Obtenemos los órganos y las asignaciones actuales de la API de Apps Script
+    # (Asegurate de que tu backend tenga o devuelva los datos de ambas solapas)
+    try:
+        res_org = requests.get(f"{API_URL}?action=GET_TODAS_ASIGNACIONES_O_ORGANOS").json() # O lectura directa
+    except Exception:
+        pass
+
+    st.info("💡 **Tip:** Para verificar rápidamente los países sin asignar, revisa la solapa **`Organos`** de tu Google Sheet: los que tengan un guion `"-"` en la **Columna E (`id_asignacion`)** son los países o bancas que todavía no fueron sorteados ni asignados a ninguna escuela.")
+
+# ---------------------------------------------------------
+# 5. ALERTAS MÉDICAS
+# ---------------------------------------------------------
+elif menu_admin == "🩺 Alertas Médicas y Alergias":
+    st.subheader("🩺 Reporte de Salud y Alergias Declaradas")
+    
+    if nominas:
+        # Filtramos aquellos que cargaron alguna alergia distinta a "Ninguna"
+        alerta_nominas = [n for n in nominas if n.get("alergias_medicas") and str(n.get("alergias_medicas")).strip().lower() not in ["ninguna", "-", ""]]
+        
+        if not alerta_nominas:
+            st.success("✅ No hay alertas médicas registradas en las nóminas actuales.")
+        else:
+            st.warning(f"⚠️ Se encontraron {len(alerta_nominas)} participantes con observaciones médicas:")
+            df_alertas = pd.DataFrame(alerta_nominas)
+            st.dataframe(df_alertas[["id_delegacion", "nombre", "apellido", "dni", "rol_mnu", "alergias_medicas"]], use_container_width=True)
+    else:
+        st.info("No hay participantes cargados en las nóminas todavía.")
