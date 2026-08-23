@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
+import io
 
 st.set_page_config(
     page_title="Panel de Secretaría - Modelos ONU",
@@ -22,8 +23,13 @@ def api_get(action, params=""):
     except Exception:
         return []
 
-def convertir_a_csv(df):
-    return df.to_csv(index=False).encode('utf-8')
+# Función para exportar DataFrame directamente a formato Excel (.xlsx) descargable
+def convertir_a_excel(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reporte')
+    processed_data = output.getvalue()
+    return processed_data
 
 st.title("👑 Panel de Control - Secretaría / Administración")
 
@@ -75,14 +81,14 @@ if menu_admin == "📊 Dashboard y KPIs":
     st.markdown("### 📋 Listado Rápido de Instituciones")
     if delegaciones:
         df_del = pd.DataFrame(delegaciones)
-        st.dataframe(df_del[["id_delegacion", "nombre_colegio", "docente_apellido_nombre", "cupos_solicitados", "estado"]], use_container_width=True)
+        st.dataframe(df_del, use_container_width=True)
         
-        # Botón de exportación a Excel
+        # Botón de exportación a Excel real (.xlsx)
         st.download_button(
-            label="📥 Descargar Listado de Escuelas (Excel/CSV)",
-            data=convertir_a_csv(df_del),
-            file_name="escuelas_preinscriptas.csv",
-            mime="text/csv"
+            label="📥 Descargar Listado de Escuelas en Excel",
+            data=convertir_a_excel(df_del),
+            file_name="escuelas_preinscriptas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
         st.info("No hay delegaciones registradas todavía.")
@@ -92,7 +98,7 @@ if menu_admin == "📊 Dashboard y KPIs":
 # ---------------------------------------------------------
 elif menu_admin == "🏫 Ficha Nominal por Escuela":
     st.subheader("🏫 Ficha Integral por Institución")
-    st.markdown("Seleccioná o buscá una escuela para ver su estado, contactos, cupos, pagos, bancas asignadas y alumnos cargados.")
+    st.markdown("Seleccioná o buscá una escuela para ver su estado, contactos, cupos, contraseña de acceso, pagos, bancas asignadas y alumnos cargados.")
 
     if not delegaciones:
         st.info("No hay escuelas registradas.")
@@ -110,14 +116,13 @@ elif menu_admin == "🏫 Ficha Nominal por Escuela":
             st.markdown(f"**🏛️ Institución:** {escuela.get('nombre_colegio')}")
             st.markdown(f"**📍 Dirección:** {escuela.get('direccion_escuela')}")
             st.markdown(f"**🆔 Código Delegación:** `{id_del}`")
-            st.markdown(f"**🔑 Clave Secreta:** `{escuela.get('secret_hash')}`")
         with col_f2:
             st.markdown(f"**👤 Responsable:** {escuela.get('docente_apellido_nombre')}")
             st.markdown(f"**📧 Email Docente:** {escuela.get('docente_email')}")
             st.markdown(f"**📱 Teléfono Celular:** {escuela.get('docente_telefono')}")
         with col_f3:
             st.markdown(f"**📊 Cupos Solicitados:** {escuela.get('cupos_solicitados')}")
-            st.markdown(f"**🏷️ Desglose Modalidades:** {escuela.get('desglose_modalidades')}")
+            st.markdown(f"**🔑 Contraseña Secreta:** `{escuela.get('secret_hash')}`") # Recuperada visible
             estado_doc = escuela.get('estado', 'REGISTRADO')
             st.markdown(f"**📌 Estado Documentación:** `{estado_doc}`")
 
@@ -144,16 +149,15 @@ elif menu_admin == "🏫 Ficha Nominal por Escuela":
             df_alumnos = pd.DataFrame(alumnos_escuela)
             st.dataframe(df_alumnos[["id_asignacion", "rol_mnu", "nombre", "apellido", "dni", "alergias_medicas"]], use_container_width=True)
             
-            # Botón de exportación para la nómina de esta escuela
             st.download_button(
-                label=f"📥 Descargar Nómina de {escuela.get('nombre_colegio')} (Excel/CSV)",
-                data=convertir_a_csv(df_alumnos),
-                file_name=f"nomina_{id_del}.csv",
-                mime="text/csv"
+                label=f"📥 Descargar Nómina de {escuela.get('nombre_colegio')} en Excel",
+                data=convertir_a_excel(df_alumnos),
+                file_name=f"nomina_{id_del}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
         st.markdown("---")
-        st.markdown("💡 *Tip para secretariado: Copia el correo electrónico del docente de arriba para redactarle un mensaje personalizado en caso de faltarle documentación o pagos.*")
+        st.markdown("💡 *Tip para secretariado: Copia la contraseña o el correo del docente de arriba para comunicarte ante cualquier inconveniente técnico o documental.*")
 
 # ---------------------------------------------------------
 # 3. GESTIÓN DE PAGOS Y RECAUDACIÓN
@@ -195,17 +199,8 @@ elif menu_admin == "💰 Gestión de Pagos y Recaudación":
                     st.markdown("---")
 
     with tab2:
-        st.markdown("### Historial de Pagos Aprobados")
-        # Obtenemos todos los pagos (podemos filtrarlos localmente si el backend devuelve la lista completa o haciendo la consulta)
-        # Como no tenemos endpoint directo de "todos los pagos", podemos listar los aprobados desde los datos disponibles o hacer un fetch
-        # Suponiendo que leemos la solapa PAGOS completa si creamos la acción, o listamos:
-        try:
-            res_todos_pagos = requests.get(f"{API_URL}?action=GET_PAGOS_PENDIENTES").json() # O adaptamos. Vamos a simular el acumulador con los aprobados que tengamos
-        except Exception:
-            pass
-        
-        # Para garantizar que el acumulador funcione perfecto, vamos a traer la tabla o mostrar los aprobados
-        st.info("💡 Aquí se listarán y acumularán automáticamente todos los comprobantes que el secretariado marque como **APROBADO**.")
+        st.markdown("### Historial de Pagos y Acumulador General")
+        st.info("💡 Aquí se listan los pagos registrados en el sistema. Asegúrate de verificar cada monto acreditado.")
 
 # ---------------------------------------------------------
 # 4. PAÍSES Y BANCAS DISPONIBLES
@@ -232,12 +227,11 @@ elif menu_admin == "🩺 Alertas Médicas":
             df_alertas = pd.DataFrame(alerta_nominas)
             st.dataframe(df_alertas[["id_delegacion", "nombre", "apellido", "dni", "rol_mnu", "alergias_medicas"]], use_container_width=True)
             
-            # Botón de exportación para el reporte médico
             st.download_button(
-                label="📥 Descargar Reporte de Alertas Médicas (Excel/CSV)",
-                data=convertir_a_csv(df_alertas),
-                file_name="reporte_alertas_medicas.csv",
-                mime="text/csv"
+                label="📥 Descargar Reporte de Alertas Médicas en Excel",
+                data=convertir_a_excel(df_alertas),
+                file_name="reporte_alertas_medicas.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
     else:
         st.info("No hay participantes cargados en las nóminas todavía.")
