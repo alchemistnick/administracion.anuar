@@ -94,7 +94,7 @@ with tab_dash:
     st.markdown("### 📋 Listado Rápido de Instituciones")
     if delegaciones:
         df_del = pd.DataFrame(delegaciones).astype(str)
-        st.dataframe(df_del, use_container_width=True)
+        st.dataframe(df_del, width=None)
         descargar_csv_para_excel(df_del, "escuelas_preinscriptas")
     else:
         st.info("No hay delegaciones registradas todavía.")
@@ -147,7 +147,7 @@ with tab_ficha:
             st.info("La escuela aún no ha cargado participantes en su nómina.")
         else:
             df_alumnos = pd.DataFrame(alumnos_escuela).astype(str)
-            st.dataframe(df_alumnos[["id_asignacion", "rol_mnu", "nombre", "apellido", "dni", "alergias_medicas"]], use_container_width=True)
+            st.dataframe(df_alumnos[["id_asignacion", "rol_mnu", "nombre", "apellido", "dni", "alergias_medicas"]], width=None)
             descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
 
 # 3. AUDITORÍA
@@ -273,7 +273,7 @@ with tab_pagos:
             total_recaudado = pagos_aprobados['monto'].astype(float).sum() if not pagos_aprobados.empty else 0
             
             st.metric("Total Recaudado (Pagos Aprobados)", f"${total_recaudado:,.2f}")
-            st.dataframe(df_pagos, use_container_width=True)
+            st.dataframe(df_pagos, width=None)
             descargar_csv_para_excel(df_pagos, "historial_pagos")
         else:
             st.info("No hay registros de pagos cargados.")
@@ -295,7 +295,7 @@ with tab_medicos:
         else:
             st.warning(f"⚠️ Se encontraron {len(alerta_nominas)} participantes con observaciones médicas:")
             df_alertas = pd.DataFrame(alerta_nominas).astype(str)
-            st.dataframe(df_alertas[["id_delegacion", "nombre", "apellido", "dni", "rol_mnu", "alergias_medicas"]], use_container_width=True)
+            st.dataframe(df_alertas[["id_delegacion", "nombre", "apellido", "dni", "rol_mnu", "alergias_medicas"]], width=None)
             descargar_csv_para_excel(df_alertas, "reporte_alertas_medicas")
     else:
         st.info("No hay participantes cargados en las nóminas todavía.")
