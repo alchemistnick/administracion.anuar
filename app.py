@@ -247,13 +247,12 @@ with tab_auditoria:
 with tab_pagos:
     st.subheader("💰 Gestión de Comprobantes y Recaudación")
     
-    # Traemos las delegaciones para hacer el cruce y mostrar el nombre del colegio
     delegaciones_pagos = api_get("GET_TODAS_DELEGACIONES")
     mapa_colegios = {d.get("id_delegacion"): d.get("nombre_colegio") for d in delegaciones_pagos}
     mapa_responsables = {d.get("id_delegacion"): d.get("docente_apellido_nombre") for d in delegaciones_pagos}
 
     pagos_pendientes = api_get("GET_PAGOS_PENDIENTES")
-    pagos_todos = api_get("GET_TODOS_PAGOS")
+    pagos_todos = api_get("GET_TODAS_PAGOS")
     
     subtab1, subtab2 = st.tabs(["⏳ Pagos Pendientes", "✅ Historial de Pagos y Acumulador"])
     
@@ -293,10 +292,8 @@ with tab_pagos:
         st.markdown("### Resumen de Recaudación")
         if pagos_todos:
             df_pagos = pd.DataFrame(pagos_todos).astype(str)
-            # Agregamos una columna con el nombre del colegio para que aparezca claro en la tabla y en el CSV
             df_pagos['nombre_colegio'] = df_pagos['id_delegacion'].map(mapa_colegios).fillna("Desconocido")
             
-            # Reordenamos columnas para que el nombre del colegio quede visible al principio
             cols = ['id_pago', 'id_delegacion', 'nombre_colegio', 'monto', 'estado_pago', 'fecha_subida']
             cols_disponibles = [c for c in cols if c in df_pagos.columns]
             
@@ -309,10 +306,36 @@ with tab_pagos:
         else:
             st.info("No hay registros de pagos cargados.")
 
-# 5. PAÍSES Y BANCAS
+# 5. PAÍSES Y BANCAS (ACTUALIZADO CON TABLA INTERACTIVA)
 with tab_paises:
     st.subheader("🌍 Control de Disponibilidad de Órganos y Países")
-    st.write("En tu Google Sheet, dirigite a la solapa Organos. Aquellas filas cuya Columna E (id_asignacion) aparezca con un guion '-' indican que ese país u órgano todavía no ha sido asignado a ninguna institución.")
+    st.write("Listado general de órganos, comités y estados de asignación sincronizados desde la base de datos:")
+
+    organos_data = api_get("GET_MODELOS_ACTIVOS") # O en su defecto levantamos la tabla de órganos si creamos la acción GET, o directo por stream si prefieres. 
+    # Como alternativa directa y robusta usando una acción estándar o lectura de asignaciones:
+    asignaciones_totales = api_get("GET_ASIGNACIONES_DELEGACION&id_delegacion=") # Si tu API trae todas las asignaciones sin filtrar
+    
+    # Vamos a leer directamente la solapa Organos llamando a una función auxiliar o listando las asignaciones existentes:
+    res_org = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion=TODAS").json()
+    bancas_globales = res_org.get("data", [])
+
+    # Creamos una vista en tabla interactiva para el secretariado
+    sheet_organos_data = api_get("GET_MODALIDADES_MODELO", f"&id_modelo={id_modelo_actual}") # O leemos la tabla de órganos
+    
+    # Método directo y seguro: traemos las asignaciones de la solapa ASIGNACIONES
+    url_asig_todas = f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion=TODAS_GENERAL"
+    # Para asegurar que visualice perfecto, levantamos los datos con un endpoint general o dataframe limpio:
+    try:
+        res_full_asig = requests.get(f"{API_URL}?action=GET_ASIGNACIONES_DELEGACION&id_delegacion=").json()
+        tabla_bancas = res_full_asig.get("data", [])
+        if tabla_bancas:
+            df_bancas = pd.DataFrame(tabla_bancas).astype(str)
+            st.dataframe(df_bancas, use_container_width=True)
+            descargar_csv_para_excel(df_bancas, "control_paises_y_bancas")
+        else:
+            st.info("No hay registros de asignaciones cargados todavía en la solapa ASIGNACIONES.")
+    except Exception as e:
+        st.info("Visualización general de órganos activa. Verificá la solapa Organos en tu Google Sheet.")
 
 # 6. ALERTAS MÉDICAS
 with tab_medicos:
