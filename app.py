@@ -10,7 +10,7 @@ st.set_page_config(
 )
 
 # URL DE LA NUEVA IMPLEMENTACIÓN DE APPS SCRIPT
-API_URL = "https://script.google.com/macros/s/AKfycbybpH8ByPnhJycsXgZI5Xf-wDHdBLI0pZwfdbq0xo2Q6RAypxgUcEaeW3IwZ6uq_pY8SQ/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbyX729FHTgaBMyRau-hG0oeOC3XZ3nD6hDqHg09RRT7GA0BAwbS1dhDsAvOHz6j51oC/exec"
 
 @st.cache_data(ttl=60)
 def cargar_modelos_activos():
@@ -94,8 +94,8 @@ if admin_pass == "Secretaria2026":
         st.markdown("---")
         st.info("ℹ️ Para cargar los resultados del sorteo, completá la solapa **`ASIGNACIONES_EXCEL`** en tu Google Sheet (Columna A: Colegio, Columna B: País) y ejecutá la función `importarAsignacionesDesdeExcel()` en Google Apps Script.")
 
-    # ---------------------------------------------------------
-    # MÓDULO 1: REVISIÓN DE PAGOS Y MODIFICACIONES
+   # ---------------------------------------------------------
+    # MÓDULO 1: REVISIÓN DE PAGOS Y MODIFICACIONES (ASOCIACIÓN BLINDADA)
     # ---------------------------------------------------------
     elif menu == "1. Revisión de Pagos y Modificaciones":
         st.subheader(f"Auditoría General - {modelo_seleccionado}")
@@ -103,19 +103,22 @@ if admin_pass == "Secretaria2026":
         
         with tab_pagos:
             try:
+                # 1. Obtener pagos pendientes
                 res_pagos = requests.get(f"{API_URL}?action=GET_PAGOS_PENDIENTES").json()
                 pagos = res_pagos.get("data", [])
                 
-                res_escuelas = requests.get(f"{API_URL}?action=GET_DELEGACIONES_APROBADAS&id_modelo={id_modelo_actual}").json()
+                # 2. Obtener TODAS las delegaciones registradas sin importar si están o no aprobadas aún
+                res_escuelas = requests.get(f"{API_URL}?action=GET_TODAS_DELEGACIONES&id_modelo={id_modelo_actual}").json()
                 escuelas = res_escuelas.get("data", [])
                 
+                # Crear diccionario de mapeo tolerante: { "DEL-001": dict_escuela }
                 mapa_escuelas = {}
                 for e in escuelas:
                     id_d = str(e.get("id_delegacion", "")).strip().upper()
                     if id_d:
                         mapa_escuelas[id_d] = e
 
-                pagos_filtrados = [p for p in pagos if str(p.get("id_modelo", "")).strip() == id_modelo_actual or not p.get("id_modelo")]
+                pagos_filtrados = [p for p in pagos if str(p.get("id_modelo", "")).strip().upper() == id_modelo_actual.upper() or not p.get("id_modelo")]
                 
                 if not pagos_filtrados:
                     st.success(f"🎉 No hay comprobantes pendientes de revisión para {modelo_seleccionado}.")
@@ -125,16 +128,53 @@ if admin_pass == "Secretaria2026":
                         id_del = str(pago.get('id_delegacion', '-')).strip().upper()
                         monto = pago.get('monto', 0)
                         
+                        # Cruzar datos con la solapa DELEGACIONES (búsqueda multicampo)
                         datos_escuela = mapa_escuelas.get(id_del, {})
                         
-                        nombre_colegio = datos_escuela.get("nombre_colegio") or datos_escuela.get("institucion") or "Escuela Registrada"
-                        docente_resp = datos_escuela.get("docente_apellido_nombre") or datos_escuela.get("docente_a_cargo") or "No informado"
-                        docente_email = datos_escuela.get("docente_email") or datos_escuela.get("email_docente_responsable") or datos_escuela.get("email_institucional") or "-"
-                        docente_tel = datos_escuela.get("docente_telefono") or datos_escuela.get("cel_docente") or datos_escuela.get("telefono_institucional") or "-"
-                        cupos_pedidos = datos_escuela.get("cupos_solicitados") or datos_escuela.get("cant_de_delegados") or 0
-                        desglose_pedidos = datos_escuela.get("desglose_modalidades") or "No especificado"
-                        docentes_acomp = datos_escuela.get("docentes_acompanantes") or 1
+                        nombre_colegio = (
+                            datos_escuela.get("nombre_colegio") or 
+                            datos_escuela.get("escuela") or 
+                            datos_escuela.get("institucion") or 
+                            "Escuela Registrada"
+                        )
+                        docente_resp = (
+                            datos_escuela.get("docente_apellido_nombre") or 
+                            datos_escuela.get("docente_apellido_nomb") or 
+                            datos_escuela.get("docente_a_cargo") or 
+                            "No informado"
+                        )
+                        docente_email = (
+                            datos_escuela.get("docente_email") or 
+                            datos_escuela.get("docente_ei") or 
+                            datos_escuela.get("email_docente_responsable") or 
+                            datos_escuela.get("email_institucional") or 
+                            "-"
+                        )
+                        docente_tel = (
+                            datos_escuela.get("docente_telefono") or 
+                            datos_escuela.get("docente_te") or 
+                            datos_escuela.get("cel_docente") or 
+                            datos_escuela.get("telefono_institucional") or 
+                            "-"
+                        )
+                        cupos_pedidos = (
+                            datos_escuela.get("cupos_solicitados") or 
+                            datos_escuela.get("cupos_soli") or 
+                            datos_escuela.get("cant_de_delegados") or 
+                            0
+                        )
+                        desglose_pedidos = (
+                            datos_escuela.get("desglose_modalidades") or 
+                            datos_escuela.get("desglose_r") or 
+                            "No especificado"
+                        )
+                        docentes_acomp = (
+                            datos_escuela.get("docentes_acompanantes") or 
+                            datos_escuela.get("docentes") or 
+                            1
+                        )
 
+                        # Tarjeta de inspección
                         with st.expander(f"💳 {id_pago} | {nombre_colegio} ({id_del}) — Monto Subido: ${monto:,.2f}"):
                             st.markdown("##### 📄 Resumen de la Preinscripción Solicitada:")
                             
@@ -195,56 +235,6 @@ if admin_pass == "Secretaria2026":
 
             except Exception as e:
                 st.error(f"Error al cargar la solapa de pagos: {e}")
-
-        with tab_modificaciones:
-            try:
-                res_mod = requests.get(f"{API_URL}?action=GET_MODIFICACIONES_PENDIENTES").json()
-                pendientes_mod = res_mod.get("data", [])
-                pendientes_filtrados = [d for d in pendientes_mod if d.get("id_modelo") == id_modelo_actual or not d.get("id_modelo")]
-                
-                if not pendientes_filtrados:
-                    st.success("No hay solicitudes pendientes.")
-                else:
-                    for esc in pendientes_filtrados:
-                        with st.expander(f"🏫 {esc.get('nombre_colegio')} ({esc.get('id_delegacion')})"):
-                            st.write(f"**Docente Cargo:** {esc.get('docente_apellido_nombre')} ({esc.get('docente_email')}) | Tel: {esc.get('docente_telefono')}")
-                            st.write(f"**Dirección Institucional:** {esc.get('direccion_escuela')}")
-                            
-                            propuesta_raw = esc.get("propuesta_modificacion", "{}")
-                            try:
-                                prop = json.loads(propuesta_raw)
-                            except Exception:
-                                prop = {}
-                            
-                            nuevos_cupos = prop.get("nuevos_cupos", esc.get("cupos_solicitados"))
-                            nuevo_desglose = prop.get("nuevo_desglose", esc.get("desglose_modalidades"))
-                            docentes_acomp = prop.get("docentes_acompanantes", esc.get("docentes_acompanantes"))
-
-                            st.write(f"• **Nuevos Cupos Estudiantes:** {nuevos_cupos}")
-                            st.write(f"• **Nuevos Docentes Acompañantes:** {docentes_acomp}")
-                            st.write(f"• **Desglose:** {nuevo_desglose}")
-                            
-                            col_m1, col_m2 = st.columns(2)
-                            with col_m1:
-                                if st.button("✅ APROBAR MODIFICACIÓN", key=f"app_mod_{esc.get('id_delegacion')}"):
-                                    payload = {"action": "RESPONDER_MODIFICACION_PREINSCRIPCION", "usuario": "ADMIN", "data": {"id_delegacion": esc.get('id_delegacion'), "aprobar": True, "nuevos_cupos": nuevos_cupos, "nuevo_desglose": nuevo_desglose, "docentes_acompanantes": docentes_acomp}}
-                                    r = requests.post(API_URL, json=payload).json()
-                                    if r.get("status") == "SUCCESS":
-                                        st.cache_data.clear()
-                                        st.success("Aprobado")
-                                        st.rerun()
-
-                            with col_m2:
-                                if st.button("❌ RECHAZAR CAMBIO", key=f"rej_mod_{esc.get('id_delegacion')}"):
-                                    payload = {"action": "RESPONDER_MODIFICACION_PREINSCRIPCION", "usuario": "ADMIN", "data": {"id_delegacion": esc.get('id_delegacion'), "aprobar": False}}
-                                    r = requests.post(API_URL, json=payload).json()
-                                    if r.get("status") == "SUCCESS":
-                                        st.cache_data.clear()
-                                        st.info("Rechazado")
-                                        st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
-
     # ---------------------------------------------------------
     # MÓDULO 2: NÓMINA GENERAL
     # ---------------------------------------------------------
