@@ -1,0 +1,24 @@
+name: Mantener Streamlit Despierto
+
+on:
+  schedule:
+    # Se ejecuta cada 6 horas de forma automática
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Te permite activarlo manualmente si quieres
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@://github.com"
+
+      - name: Hacer commit vacío y Push
+        run: |
+          git commit --allow-empty -m "Mantener activa la app de Streamlit"
+          git push
