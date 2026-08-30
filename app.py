@@ -8,7 +8,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbyVCSQXsfeI-6nbzBXmQwT9k-j8efcS9QE51m6QN3ZRrHCI_zb5CiwnuF9Kc50Vr6rUKQ/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbyYsABt6YekLz8ZqutWyza0jNrT0xmuwKPbcm5Mf3RO6KWCLBS001ki3UJdCYz4S4LVbw/exec"
 
 def api_get(action, params=""):
     try:
