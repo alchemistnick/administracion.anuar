@@ -2,11 +2,20 @@ import streamlit as st
 import requests
 import pandas as pd
 
+# Ocultar la barra superior, el menú de opciones y el pie de página
+hide_streamlit_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 st.set_page_config(
     page_title="Panel de Secretaría - Modelos ONU",
     page_icon="👑",
-    layout="wide"
-)
+    layout="wide")
+
 
 API_URL = st.secrets ["API_URL"]
 
