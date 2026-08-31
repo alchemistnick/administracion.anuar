@@ -52,7 +52,7 @@ if not st.session_state["admin_logueado"]:
         btn_ingresar = st.form_submit_button("Ingresar al Panel")
         
         if btn_ingresar:
-            if pass_ingresada.strip() == "secreta2026":
+            if pass_ingresada.strip() == st.secrets ["admin_logueado"]:
                 st.session_state["admin_logueado"] = True
                 st.success("¡Acceso concedido!")
                 st.rerun()
