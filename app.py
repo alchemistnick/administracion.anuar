@@ -8,7 +8,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = "https://script.google.com/macros/s/AKfycbyYsABt6YekLz8ZqutWyza0jNrT0xmuwKPbcm5Mf3RO6KWCLBS001ki3UJdCYz4S4LVbw/exec"
+API_URL = st.secrets ["API_URL"]
 
 def api_get(action, params=""):
     try:
