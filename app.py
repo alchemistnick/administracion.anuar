@@ -1,3 +1,6 @@
+import db_firebase
+
+st.stop()  # Detiene app.py para mostrar solo la interfaz de prueba de Firebase
 import streamlit as st
 import requests
 import pandas as pd
