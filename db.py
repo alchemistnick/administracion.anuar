@@ -1,8 +1,9 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
+import pandas as pd
 import streamlit as st
 
-# Inicialización Singleton de Firebase
+# Inicialización de Firebase
 if not firebase_admin._apps:
     cred = credentials.Certificate(dict(st.secrets["firebase"]))
     firebase_admin.initialize_app(cred)
@@ -10,12 +11,12 @@ if not firebase_admin._apps:
 db = firestore.client()
 
 # ==========================================
-# 1. GESTIÓN DE MODELOS
+# 1. GESTIÓN DE MODELOS Y CONFIGURACIÓN
 # ==========================================
 
 
 def obtener_modelos_activos():
-    """Recupera la lista de modelos desde Firestore."""
+    """Obtiene la lista de modelos desde Firestore o genera una base de respaldo."""
     try:
         docs = db.collection("modelos").stream()
         modelos = []
@@ -25,7 +26,6 @@ def obtener_modelos_activos():
             modelos.append(m)
 
         if not modelos:
-            # Lista base de respaldo en caso de que la colección 'modelos' esté vacía inicialmente
             return [
                 {
                     "id_modelo": "MONUCBA_2026",
@@ -41,13 +41,37 @@ def obtener_modelos_activos():
         ]
 
 
+def obtener_esquema_formulario(id_modelo):
+    """Recupera la lista de campos personalizados configurados para el modelo."""
+    try:
+        doc = db.collection("configuracion").document(str(id_modelo)).get()
+        if doc.exists:
+            return doc.to_dict().get("campos_personalizados", [])
+        return []
+    except Exception as e:
+        st.error(f"Error al obtener esquema del formulario: {e}")
+        return []
+
+
+def guardar_esquema_formulario(id_modelo, lista_campos):
+    """Guarda la estructura de campos personalizados del formulario."""
+    try:
+        db.collection("configuracion").document(str(id_modelo)).set(
+            {"campos_personalizados": lista_campos}, merge=True
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar esquema del formulario: {e}")
+        return False
+
+
 # ==========================================
-# 2. DELEGACIONES / ESCUELAS POR MODELO
+# 2. DELEGACIONES Y ESCUELAS
 # ==========================================
 
 
 def obtener_delegaciones_por_modelo(id_modelo=None):
-    """Obtiene las delegaciones registradas, filtrando opcionalmente por modelo."""
+    """Obtiene las delegaciones filtradas por el modelo activo."""
     try:
         ref = db.collection("delegaciones")
         if id_modelo:
@@ -63,12 +87,12 @@ def obtener_delegaciones_por_modelo(id_modelo=None):
             delegaciones.append(datos)
         return delegaciones
     except Exception as e:
-        st.error(f"Error al obtener delegaciones: {e}")
+        st.error(f"Error al consultar delegaciones: {e}")
         return []
 
 
 def actualizar_estado_delegacion(id_delegacion, estado, motivo=""):
-    """Actualiza el estado de aprobación o rechazo de un legajo de escuela."""
+    """Actualiza el estado de aprobación/rechazo de un legajo."""
     try:
         payload = {"estado": estado}
         if motivo:
@@ -83,12 +107,12 @@ def actualizar_estado_delegacion(id_delegacion, estado, motivo=""):
 
 
 # ==========================================
-# 3. INTEGRANTES / NÓMINA DE ALUMNOS
+# 3. INTEGRANTES Y NÓMINAS
 # ==========================================
 
 
 def obtener_integrantes_delegacion(id_delegacion):
-    """Obtiene todos los participantes registrados en una delegación específica."""
+    """Recupera los integrantes de una delegación específica."""
     try:
         docs = (
             db.collection("delegaciones")
@@ -103,12 +127,12 @@ def obtener_integrantes_delegacion(id_delegacion):
             integrantes.append(d)
         return integrantes
     except Exception as e:
-        st.error(f"Error al obtener integrantes de la delegación: {e}")
+        st.error(f"Error al obtener integrantes: {e}")
         return []
 
 
 def obtener_nominas_por_modelo(id_modelo=None):
-    """Obtiene la nómina general de todos los estudiantes y docentes del modelo seleccionado."""
+    """Obtiene la nómina consolidada de participantes para el modelo seleccionado."""
     delegaciones = obtener_delegaciones_por_modelo(id_modelo)
     todas_nominas = []
     for d in delegaciones:
@@ -127,7 +151,7 @@ def obtener_nominas_por_modelo(id_modelo=None):
 
 
 def obtener_todos_pagos(id_modelo=None):
-    """Recupera los comprobantes e historial de pagos."""
+    """Obtiene el historial de pagos filtrado por modelo."""
     try:
         ref = db.collection("pagos")
         if id_modelo:
@@ -147,7 +171,7 @@ def obtener_todos_pagos(id_modelo=None):
 
 
 def obtener_pagos_pendientes(id_modelo=None):
-    """Filtra únicamente los pagos con estado PENDIENTE del modelo correspondiente."""
+    """Filtra únicamente los pagos pendientes de revisión."""
     pagos = obtener_todos_pagos(id_modelo)
     return [
         p
@@ -157,12 +181,57 @@ def obtener_pagos_pendientes(id_modelo=None):
 
 
 def actualizar_estado_pago(id_pago, nuevo_estado):
-    """Cambia el estado de revisión de un pago (APROBADO/RECHAZADO)."""
+    """Actualiza el estado de aprobación o rechazo de un pago."""
     try:
         db.collection("pagos").document(str(id_pago)).set(
             {"estado_pago": nuevo_estado}, merge=True
         )
         return True
     except Exception as e:
-        st.error(f"Error al actualizar estado del pago: {e}")
+        st.error(f"Error al actualizar estado de pago: {e}")
         return False
+
+
+# ==========================================
+# 5. AUDITORÍA DE ACREDITACIÓN
+# ==========================================
+
+
+def procesar_acreditacion_forms(df_forms, id_modelo):
+    """Cruza los DNI de Google Forms contra la nómina en Firestore."""
+    nominas_oficiales = obtener_nominas_por_modelo(id_modelo)
+    dnis_oficiales = {
+        str(n.get("dni")).strip(): n for n in nominas_oficiales if n.get("dni")
+    }
+    dnis_acreditados_forms = set(
+        df_forms["DNI"].astype(str).str.strip().tolist()
+    )
+
+    total_nominados = len(dnis_oficiales)
+    acreditados_correctos = 0
+    no_registrados = []
+
+    for dni in dnis_acreditados_forms:
+        if dni in dnis_oficiales:
+            acreditados_correctos += 1
+            p = dnis_oficiales[dni]
+            db.collection("delegaciones").document(
+                p["id_delegacion"]
+            ).collection("integrantes").document(dni).set(
+                {"acreditado": True}, merge=True
+            )
+        else:
+            no_registrados.append(dni)
+
+    pct = (
+        round((acreditados_correctos / total_nominados) * 100, 2)
+        if total_nominados > 0
+        else 0
+    )
+
+    return {
+        "total_nominados": total_nominados,
+        "total_acreditados": acreditados_correctos,
+        "porcentaje": pct,
+        "no_registrados": no_registrados,
+    }
