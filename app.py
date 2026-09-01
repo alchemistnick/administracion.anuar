@@ -2,12 +2,14 @@ import streamlit as st
 import requests
 import pandas as pd
 import db_firebase
-# Configuración básica de página
+import streamlit as st
+
+# Configuración inicial de la página
 st.set_page_config(
     page_title="Proyecto DELTA - Gestión", page_icon="🌐", layout="wide"
 )
 
-# Menú de navegación en la barra lateral
+# Menú lateral para cambiar de entorno
 opcion_menu = st.sidebar.radio(
     "Navegación / Entornos",
     ["Sistema Principal (Apps Script)", "🔥 Prueba Firebase"],
@@ -15,11 +17,14 @@ opcion_menu = st.sidebar.radio(
 
 if opcion_menu == "🔥 Prueba Firebase":
     import db_firebase
-    # Todo el código dentro de db_firebase.py se ejecutará aquí
-else:
-    st.title("Sistema Integral de Gestión - Proyecto DELTA")
-    # AQUÍ CONTINÚA EL CÓDIGO ACTUAL DE TU APP
-    # (Tus formularios, login, vista de docentes, etc.)
+
+    st.stop()  # Detiene la ejecución AQUÍ para no cargar la otra interfaz
+
+# ---------------------------------------------------------
+# A PARTIR DE AQUÍ CONTINÚA TODO EL CÓDIGO DE TU APP ACTUAL
+# ---------------------------------------------------------
+st.title("Sistema Integral de Gestión - Proyecto DELTA")
+# (Tus vistas, formularios y lógica original)
 # Ocultar la barra superior, el menú de opciones y el pie de página
 hide_streamlit_style = """
     <style>
