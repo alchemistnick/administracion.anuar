@@ -4,17 +4,20 @@ import streamlit as st
 from db import (
     actualizar_estado_delegacion,
     actualizar_estado_pago,
+    obtener_delegaciones_por_modelo,
     obtener_integrantes_delegacion,
+    obtener_modelos_activos,
+    obtener_nominas_por_modelo,
     obtener_pagos_pendientes,
-    obtener_todas_delegaciones,
-    obtener_todas_nominas,
     obtener_todos_pagos,
 )
 
+# 1. Configuración de página de Streamlit
 st.set_page_config(
     page_title="Panel de Secretaría - Modelos ONU", page_icon="👑", layout="wide"
 )
 
+# Ocultar menú estándar y pie de página
 hide_streamlit_style = """
     <style>
     #MainMenu {visibility: hidden;}
@@ -28,16 +31,18 @@ API_URL = st.secrets["API_URL"]
 
 
 def notificar_apps_script(action, data):
+    """Llama a Google Apps Script para enviar correos electrónicos automatizados."""
     try:
         requests.post(API_URL, json={"action": action, "data": data}, timeout=5)
     except Exception as e:
         st.warning(
-            f"Cambio guardado en Firebase, pero hubo un detalle con la"
-            f" notificación por mail: {e}"
+            f"Acción guardada en Firebase, pero hubo un detalle con la"
+            f" notificación por correo: {e}"
         )
 
 
 def descargar_csv_para_excel(df, nombre_archivo):
+    """Genera botón de descarga en formato CSV compatible con Microsoft Excel."""
     df_clean = df.astype(str)
     csv = df_clean.to_csv(index=False).encode("utf-8-sig")
     return st.download_button(
@@ -51,6 +56,7 @@ def descargar_csv_para_excel(df, nombre_archivo):
 
 st.title("👑 Panel de Control - Secretaría / Administración")
 
+# Autenticación de Administración
 if "admin_logueado" not in st.session_state:
     st.session_state["admin_logueado"] = False
 
@@ -75,6 +81,16 @@ if st.sidebar.button("Cerrar Sesión Admin"):
     st.session_state["admin_logueado"] = False
     st.rerun()
 
+# --- BARRA LATERAL: SELECTOR DE MODELO ACTIVO ---
+modelos = obtener_modelos_activos()
+dict_modelos = {m["nombre_visible"]: m["id_modelo"] for m in modelos}
+
+modelo_seleccionado = st.sidebar.selectbox(
+    "📌 Seleccionar Modelo a Gestionar:", list(dict_modelos.keys())
+)
+id_modelo_actual = dict_modelos[modelo_seleccionado]
+
+st.sidebar.markdown(f"**ID Modelo Activo:** `{id_modelo_actual}`")
 st.sidebar.markdown("---")
 
 tab_dash, tab_ficha, tab_auditoria, tab_pagos, tab_paises, tab_medicos, tab_acred = (
@@ -91,10 +107,12 @@ tab_dash, tab_ficha, tab_auditoria, tab_pagos, tab_paises, tab_medicos, tab_acre
 
 # 1. DASHBOARD
 with tab_dash:
-    st.subheader("📊 Panel General")
-    delegaciones = obtener_todas_delegaciones()
-    nominas = obtener_todas_nominas()
-    pagos_pendientes = obtener_pagos_pendientes()
+    st.subheader(f"📊 Panel General - {modelo_seleccionado}")
+
+    # Carga de datos de Firestore filtrados por el modelo seleccionado
+    delegaciones = obtener_delegaciones_por_modelo(id_modelo_actual)
+    nominas = obtener_nominas_por_modelo(id_modelo_actual)
+    pagos_pendientes = obtener_pagos_pendientes(id_modelo_actual)
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -117,17 +135,19 @@ with tab_dash:
     if delegaciones:
         df_del = pd.DataFrame(delegaciones).astype(str)
         st.dataframe(df_del, use_container_width=True)
-        descargar_csv_para_excel(df_del, "escuelas_preinscriptas")
+        descargar_csv_para_excel(
+            df_del, f"escuelas_preinscriptas_{id_modelo_actual}"
+        )
     else:
-        st.info("No hay delegaciones registradas en Firestore.")
+        st.info("No hay delegaciones registradas en Firestore para este modelo.")
 
-# 2. FICHA NOMINAL CON BÚSQUEDA AVANZADA
+# 2. FICHA NOMINAL CON BÚSQUEDA INTERACTIVA
 with tab_ficha:
-    st.subheader("🏫 Ficha Integral por Institución")
-    delegaciones_ficha = obtener_todas_delegaciones()
+    st.subheader(f"🏫 Ficha Integral por Institución — {modelo_seleccionado}")
+    delegaciones_ficha = obtener_delegaciones_por_modelo(id_modelo_actual)
 
     if not delegaciones_ficha:
-        st.info("No hay escuelas registradas.")
+        st.info("No hay escuelas registradas para este modelo.")
     else:
         busqueda = st.text_input(
             "🔍 Buscar por Nombre de Escuela o Código de Delegación:", ""
@@ -141,7 +161,7 @@ with tab_ficha:
         ]
 
         if not escuelas_filtradas:
-            st.warning("No se encontraron escuelas que coincidan con el filtro.")
+            st.warning("No se encontraron escuelas que coincidan con la búsqueda.")
         else:
             opciones_escuelas = {
                 f"[{d.get('id')}] {d.get('nombre_colegio', 'Sin Nombre')}": d
@@ -156,7 +176,7 @@ with tab_ficha:
             id_del = escuela.get("id")
 
             st.markdown("---")
-            st.markdown("### 📄 Toda la Información Registrada")
+            st.markdown("### 📄 Información Registrada en Firestore")
             cols_info = st.columns(3)
             with cols_info[0]:
                 st.markdown(
@@ -167,7 +187,7 @@ with tab_ficha:
                 )
                 st.markdown(f"**🆔 ID Delegación:** `{id_del}`")
                 st.markdown(
-                    f"**📌 Estado:** `{escuela.get('estado', 'REGISTRADO')}`"
+                    f"**📌 Estado Legajo:** `{escuela.get('estado', 'REGISTRADO')}`"
                 )
             with cols_info[1]:
                 st.markdown(
@@ -178,7 +198,7 @@ with tab_ficha:
                     f"**📧 Email Docente:** {escuela.get('docente_email', '-')}"
                 )
                 st.markdown(
-                    "**📱 Teléfono:** {escuela.get('docente_telefono', '-')}"
+                    f"**📱 Teléfono:** {escuela.get('docente_telefono', '-')}"
                 )
             with cols_info[2]:
                 st.markdown(
@@ -189,7 +209,7 @@ with tab_ficha:
                     f"**🔑 Clave Hash:** `{escuela.get('secret_hash', '-')}`"
                 )
 
-            with st.expander("🔍 Ver JSON con todos los atributos de Firestore"):
+            with st.expander("🔍 Ver todos los campos (JSON de Firestore)"):
                 st.json(escuela)
 
             st.markdown("---")
@@ -213,8 +233,8 @@ with tab_ficha:
                 for doc in docentes_escuela:
                     st.write(
                         f"- **{doc.get('nombre', '')} {doc.get('apellido', '')}**"
-                        f" (DNI: {doc.get('dni', doc.get('id'))}) —"
-                        f" {doc.get('alergias_medicas', 'Sin especificaciones')}"
+                        f" (DNI: {doc.get('dni', doc.get('id'))}) — Observaciones:"
+                        f" {doc.get('alergias_medicas', 'Ninguna')}"
                     )
 
             st.markdown("### 👥 Estudiantes Registrados en Nómina")
@@ -225,13 +245,13 @@ with tab_ficha:
                 st.dataframe(df_alumnos, use_container_width=True)
                 descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
 
-# 3. AUDITORÍA Y NOTIFICACIÓN
+# 3. AUDITORÍA Y NOTIFICACIONES
 with tab_auditoria:
-    st.subheader("🔍 Auditoría de Documentación y Aprobación Final")
-    delegaciones_aud = obtener_todas_delegaciones()
+    st.subheader(f"🔍 Auditoría de Legajos — {modelo_seleccionado}")
+    delegaciones_aud = obtener_delegaciones_por_modelo(id_modelo_actual)
 
     if not delegaciones_aud:
-        st.info("No hay escuelas registradas.")
+        st.info("No hay escuelas registradas para este modelo.")
     else:
         opc_aud = {
             f"[{d.get('id')}] {d.get('nombre_colegio')} (Estado: {d.get('estado')})": d
@@ -341,9 +361,9 @@ with tab_auditoria:
 
 # 4. GESTIÓN DE PAGOS
 with tab_pagos:
-    st.subheader("💰 Gestión de Comprobantes y Recaudación")
-    pagos_pendientes = obtener_pagos_pendientes()
-    pagos_todos = obtener_todos_pagos()
+    st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
+    pagos_pendientes = obtener_pagos_pendientes(id_modelo_actual)
+    pagos_todos = obtener_todos_pagos(id_modelo_actual)
 
     sub1, sub2 = st.tabs(
         ["⏳ Pagos Pendientes", "✅ Historial de Pagos y Acumulador"]
@@ -351,7 +371,7 @@ with tab_pagos:
 
     with sub1:
         if not pagos_pendientes:
-            st.success("🎉 ¡No hay pagos pendientes de revisión!")
+            st.success("🎉 ¡No hay pagos pendientes para este modelo!")
         else:
             for p in pagos_pendientes:
                 id_pago = p.get("id_pago")
@@ -410,14 +430,16 @@ with tab_pagos:
 
             st.metric("Total Recaudado", f"${total_recaudado:,.2f}")
             st.dataframe(df_pagos, use_container_width=True)
-            descargar_csv_para_excel(df_pagos, "historial_pagos")
+            descargar_csv_para_excel(
+                df_pagos, f"historial_pagos_{id_modelo_actual}"
+            )
         else:
-            st.info("No hay pagos en Firestore.")
+            st.info("No hay registros de pagos en Firestore para este modelo.")
 
 # 5. ALERTAS MÉDICAS
 with tab_medicos:
-    st.subheader("🩺 Reporte General de Salud y Alergias")
-    nominas_medicas = obtener_todas_nominas()
+    st.subheader(f"🩺 Reporte de Salud — {modelo_seleccionado}")
+    nominas_medicas = obtener_nominas_por_modelo(id_modelo_actual)
 
     if nominas_medicas:
         alerta_nominas = [
@@ -436,15 +458,19 @@ with tab_medicos:
             )
             df_alertas = pd.DataFrame(alerta_nominas).astype(str)
             st.dataframe(df_alertas, use_container_width=True)
-            descargar_csv_para_excel(df_alertas, "reporte_alertas_medicas")
+            descargar_csv_para_excel(
+                df_alertas, f"reporte_alertas_medicas_{id_modelo_actual}"
+            )
     else:
-        st.info("No hay datos en las nóminas.")
+        st.info("No hay datos cargados en las nóminas para este modelo.")
 
 # 6. PAÍSES Y ACREDITACIÓN
 with tab_paises:
     st.subheader("🌍 Control de Disponibilidad")
-    st.info("Módulo disponible para asignaciones de Firestore.")
+    st.info("Módulo listo para vincular la colección de órganos en Firestore.")
 
 with tab_acred:
-    st.subheader("🎫 Control de Acreditación")
-    st.info("Módulo disponible para validación de acreditados de Firestore.")
+    st.subheader(f"🎫 Control de Acreditación — {modelo_seleccionado}")
+    st.info(
+        "Módulo listo para registrar asistencias de acreditación desde Firestore."
+    )
