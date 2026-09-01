@@ -1,8 +1,19 @@
-import streamlit as st
-import requests
 import pandas as pd
+import requests
+import streamlit as st
+from db import (
+    guardar_integrante,
+    guardar_o_actualizar_delegacion,
+    obtener_integrantes_delegacion,
+    obtener_todas_delegaciones,
+)
 
-# Ocultar la barra superior, el menú de opciones y el pie de página
+# 1. La configuración de página DEBE ser la primera orden de Streamlit
+st.set_page_config(
+    page_title="Panel de Secretaría - Modelos ONU", page_icon="👑", layout="wide"
+)
+
+# 2. Ocultar la barra superior, el menú de opciones y el pie de página
 hide_streamlit_style = """
     <style>
     #MainMenu {visibility: hidden;}
@@ -11,13 +22,8 @@ hide_streamlit_style = """
     </style>
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-st.set_page_config(
-    page_title="Panel de Secretaría - Modelos ONU",
-    page_icon="👑",
-    layout="wide")
 
-
-API_URL = st.secrets ["API_URL"]
+API_URL = st.secrets["API_URL"]
 
 def api_get(action, params=""):
     try:
