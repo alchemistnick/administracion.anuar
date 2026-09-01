@@ -3,28 +3,74 @@ import requests
 import pandas as pd
 import db_firebase
 import streamlit as st
+import firebase_admin
+from firebase_admin import credentials, firestore
 
-# Configuración inicial de la página
 st.set_page_config(
     page_title="Proyecto DELTA - Gestión", page_icon="🌐", layout="wide"
 )
 
-# Menú lateral para cambiar de entorno
+# Menú lateral para alternar entornos
 opcion_menu = st.sidebar.radio(
     "Navegación / Entornos",
     ["Sistema Principal (Apps Script)", "🔥 Prueba Firebase"],
 )
 
 if opcion_menu == "🔥 Prueba Firebase":
-    import db_firebase
+    # 1. Inicializar Firebase
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(dict(st.secrets["firebase"]))
+        firebase_admin.initialize_app(cred)
 
-    st.stop()  # Detiene la ejecución AQUÍ para no cargar la otra interfaz
+    db = firestore.client()
+
+    st.title("🔥 Prueba de Conexión — Firebase (DELTANUAR)")
+
+    st.subheader("1. Probar Escritura")
+    if st.button("Guardar Escuela de Prueba"):
+        try:
+            doc_ref = db.collection("delegaciones").document("DEL-001")
+            doc_ref.set(
+                {
+                    "nombre_colegio": "Instituto de Prueba DELTA",
+                    "docente_responsable": "Prof. Pérez",
+                    "docente_email": "docente@prueba.edu.ar",
+                    "cupos_solicitados": 10,
+                    "estado_tramite": "REGISTRADO",
+                }
+            )
+            st.success(
+                "¡Datos guardados con éxito en la colección 'delegaciones'!"
+            )
+        except Exception as e:
+            st.error(f"Error al escribir en Firebase: {e}")
+
+    st.subheader("2. Probar Lectura")
+    if st.button("Consultar Delegaciones"):
+        try:
+            docs = db.collection("delegaciones").stream()
+            delegaciones = []
+            for doc in docs:
+                d = doc.to_dict()
+                d["id"] = doc.id
+                delegaciones.append(d)
+
+            if delegaciones:
+                st.write("Delegaciones encontradas en la nube:")
+                st.json(delegaciones)
+            else:
+                st.info("No hay registros en la colección.")
+        except Exception as e:
+            st.error(f"Error al leer de Firebase: {e}")
+
+    # Detener la ejecución para no renderizar la app principal
+    st.stop()
 
 # ---------------------------------------------------------
-# A PARTIR DE AQUÍ CONTINÚA TODO EL CÓDIGO DE TU APP ACTUAL
+# A PARTIR DE AQUÍ CONTINÚA EL CÓDIGO NORMAL DE TU APP
 # ---------------------------------------------------------
 st.title("Sistema Integral de Gestión - Proyecto DELTA")
-# (Tus vistas, formularios y lógica original)
+# ... resto de tu app original ...
 # Ocultar la barra superior, el menú de opciones y el pie de página
 hide_streamlit_style = """
     <style>
