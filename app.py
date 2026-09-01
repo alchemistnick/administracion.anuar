@@ -3,8 +3,6 @@ import requests
 import pandas as pd
 import db_firebase
 
-st.stop()  # Detiene app.py para mostrar solo la interfaz de prueba de Firebase
-
 # Ocultar la barra superior, el menú de opciones y el pie de página
 hide_streamlit_style = """
     <style>
