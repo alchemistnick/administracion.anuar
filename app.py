@@ -29,7 +29,7 @@ API_URL = st.secrets["API_URL"]
 
 
 # ==========================================
-# FUNCIONES DE BASE DE DATOS (db.py)
+# FUNCIONES DE BASE DE DATOS
 # ==========================================
 def obtener_modelos_activos():
     try:
@@ -151,11 +151,10 @@ def ejecutar_sorteo_automatico(id_modelo):
         batch = db.batch()
         total_asignaciones_creadas = 0
 
-        # Crear pozos de países aptos para cada comité según los checkboxes marcados
+        # Pozos de países según los clics guardados por órgano
         pozos_comites = {}
         for c in comites_reglas:
             organo = str(c.get("organo_comite")).strip()
-
             paises_aptos = []
             for item in catalogo_paises:
                 if isinstance(item, dict):
@@ -167,7 +166,6 @@ def ejecutar_sorteo_automatico(id_modelo):
             random.shuffle(paises_aptos)
             pozos_comites[organo] = paises_aptos
 
-        # Asignar a cada delegación
         for del_doc in delegaciones:
             email_docente = del_doc.get("id_delegacion")
 
@@ -203,7 +201,7 @@ def ejecutar_sorteo_automatico(id_modelo):
         batch.commit()
         return (
             True,
-            f"🎉 Sorteo finalizado con éxito. Se generaron {total_asignaciones_creadas} asignaciones respetando la presencia en cada órgano.",
+            f"🎉 Sorteo finalizado con éxito. Se generaron {total_asignaciones_creadas} asignaciones de bancas/países.",
         )
 
     except Exception as e:
@@ -619,7 +617,6 @@ with tab_config:
         "📋 Campos del Formulario",
     ])
 
-    # PARÁMETROS DE COMITÉS
     with subtab_comites:
         st.markdown("### 🏛️ Estructura de Órganos y Comités")
         comites_actuales = obtener_parametros_comites(id_modelo_actual)
@@ -647,7 +644,6 @@ with tab_config:
             st.success("Parámetros actualizados.")
             st.rerun()
 
-    # CATÁLOGO E INTERFAZ DE CHECKBOXES POR PAÍS
     with subtab_catalogo:
         st.markdown("### 🌍 Catálogo de Países y Asignación de Órganos")
         st.write(
@@ -674,9 +670,12 @@ with tab_config:
                 height=150,
             )
 
-            lista_paises_procesados = [
-                p.strip() for p in paises_raw.split("\n") if p.strip()
-            ]
+            # Deduplicación limpia conservando orden
+            lista_paises_procesados = list(
+                dict.fromkeys(
+                    [p.strip() for p in paises_raw.split("\n") if p.strip()]
+                )
+            )
 
             if lista_paises_procesados:
                 st.markdown("---")
@@ -688,15 +687,18 @@ with tab_config:
 
                 mapa_pais_organos = {}
 
-                for pais in lista_paises_procesados:
+                for p_idx, pais in enumerate(lista_paises_procesados):
                     st.markdown(f"**📍 {pais}**")
                     cols = st.columns(len(lista_nombres_comites))
                     organos_seleccionados = []
 
-                    for idx, organo in enumerate(lista_nombres_comites):
-                        with cols[idx]:
+                    for o_idx, organo in enumerate(lista_nombres_comites):
+                        with cols[o_idx]:
+                            key_checkbox = f"chk_{id_modelo_actual}_{p_idx}_{o_idx}_{pais}_{organo}".replace(
+                                " ", "_"
+                            )
                             chk = st.checkbox(
-                                organo, key=f"chk_{pais}_{organo}", value=True
+                                organo, key=key_checkbox, value=True
                             )
                             if chk:
                                 organos_seleccionados.append(organo)
@@ -719,7 +721,6 @@ with tab_config:
                         )
                         st.rerun()
 
-    # SORTEO AUTOMÁTICO
     with subtab_sorteo:
         st.markdown("### 🎲 Generador y Sorteo de Asignaciones")
         if st.button("🚀 CONFIRMAR Y EJECUTAR SORTEO DE PAÍSES"):
@@ -730,7 +731,6 @@ with tab_config:
             else:
                 st.error(msg_sorteo)
 
-    # DESIGNER DE CAMPOS DE FORMULARIO
     with subtab_formulario:
         st.markdown("### 📋 Diseñador de Campos Adicionales")
         campos_actuales = obtener_esquema_formulario(id_modelo_actual)
