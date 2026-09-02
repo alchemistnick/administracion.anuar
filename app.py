@@ -5,7 +5,6 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# Configuración de página
 st.set_page_config(
     page_title="Panel de Secretaría - Modelos ONU", page_icon="👑", layout="wide"
 )
@@ -19,7 +18,6 @@ hide_streamlit_style = """
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
-# Inicialización Singleton de Firebase
 if not firebase_admin._apps:
     cred = credentials.Certificate(dict(st.secrets["firebase"]))
     firebase_admin.initialize_app(cred)
