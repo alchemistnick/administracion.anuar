@@ -100,10 +100,10 @@ def obtener_catalogo_paises(id_modelo):
         return []
 
 
-def guardar_catalogo_paises(id_modelo, lista_paises):
+def guardar_catalogo_paises(id_modelo, lista_paises_estructurada):
     try:
         db.collection("configuracion").document(str(id_modelo)).set(
-            {"catalogo_paises": lista_paises}, merge=True
+            {"catalogo_paises": lista_paises_estructurada}, merge=True
         )
         return True
     except Exception as e:
@@ -133,8 +133,8 @@ def obtener_delegaciones_por_modelo(id_modelo=None):
 
 def ejecutar_sorteo_automatico(id_modelo):
     try:
-        paises_disponibles = obtener_catalogo_paises(id_modelo)
-        if not paises_disponibles:
+        catalogo_paises = obtener_catalogo_paises(id_modelo)
+        if not catalogo_paises:
             return (
                 False,
                 "No hay un catálogo de países cargado para este modelo.",
@@ -151,13 +151,23 @@ def ejecutar_sorteo_automatico(id_modelo):
         batch = db.batch()
         total_asignaciones_creadas = 0
 
+        # Crear pozos de países aptos para cada comité según los checkboxes marcados
         pozos_comites = {}
         for c in comites_reglas:
             organo = str(c.get("organo_comite")).strip()
-            lista_mezclada = paises_disponibles.copy()
-            random.shuffle(lista_mezclada)
-            pozos_comites[organo] = lista_mezclada
 
+            paises_aptos = []
+            for item in catalogo_paises:
+                if isinstance(item, dict):
+                    if organo in item.get("organos_permitidos", []):
+                        paises_aptos.append(item.get("pais"))
+                elif isinstance(item, str):
+                    paises_aptos.append(item)
+
+            random.shuffle(paises_aptos)
+            pozos_comites[organo] = paises_aptos
+
+        # Asignar a cada delegación
         for del_doc in delegaciones:
             email_docente = del_doc.get("id_delegacion")
 
@@ -193,7 +203,7 @@ def ejecutar_sorteo_automatico(id_modelo):
         batch.commit()
         return (
             True,
-            f"🎉 Sorteo finalizado con éxito. Se generaron {total_asignaciones_creadas} asignaciones de bancas/países.",
+            f"🎉 Sorteo finalizado con éxito. Se generaron {total_asignaciones_creadas} asignaciones respetando la presencia en cada órgano.",
         )
 
     except Exception as e:
@@ -609,6 +619,7 @@ with tab_config:
         "📋 Campos del Formulario",
     ])
 
+    # PARÁMETROS DE COMITÉS
     with subtab_comites:
         st.markdown("### 🏛️ Estructura de Órganos y Comités")
         comites_actuales = obtener_parametros_comites(id_modelo_actual)
@@ -636,22 +647,79 @@ with tab_config:
             st.success("Parámetros actualizados.")
             st.rerun()
 
+    # CATÁLOGO E INTERFAZ DE CHECKBOXES POR PAÍS
     with subtab_catalogo:
-        st.markdown("### 🌍 Catálogo Maestro de Países Disponibles")
-        catalogo_actual = obtener_catalogo_paises(id_modelo_actual)
-        paises_input = st.text_area(
-            "Lista de Países (Un país por línea):",
-            value="\n".join(catalogo_actual) if catalogo_actual else "",
-            height=250,
+        st.markdown("### 🌍 Catálogo de Países y Asignación de Órganos")
+        st.write(
+            "Pegue la lista de países y seleccione mediante clics en qué"
+            " comités/órganos participa cada uno."
         )
-        if st.button("💾 Guardar Catálogo de Países"):
-            lista_paises = [
-                p.strip() for p in paises_input.split("\n") if p.strip()
-            ]
-            guardar_catalogo_paises(id_modelo_actual, lista_paises)
-            st.success("Catálogo guardado.")
-            st.rerun()
 
+        comites_modelo = obtener_parametros_comites(id_modelo_actual)
+        lista_nombres_comites = [
+            str(c.get("organo_comite")).strip()
+            for c in comites_modelo
+            if c.get("organo_comite")
+        ]
+
+        if not lista_nombres_comites:
+            st.warning(
+                "⚠️ Primero debe configurar y guardar la estructura en la"
+                " solapa '🏛️ Parámetros de Comités'."
+            )
+        else:
+            paises_raw = st.text_area(
+                "Pegue la lista de países (un país por línea):",
+                placeholder="Argentina\nBrasil\nFrancia\nEstados Unidos",
+                height=150,
+            )
+
+            lista_paises_procesados = [
+                p.strip() for p in paises_raw.split("\n") if p.strip()
+            ]
+
+            if lista_paises_procesados:
+                st.markdown("---")
+                st.markdown("#### 🔘 Seleccione los Órganos para cada País")
+                st.caption(
+                    "Marque con un clic las casillas de los comités a los que"
+                    " pertenece cada país:"
+                )
+
+                mapa_pais_organos = {}
+
+                for pais in lista_paises_procesados:
+                    st.markdown(f"**📍 {pais}**")
+                    cols = st.columns(len(lista_nombres_comites))
+                    organos_seleccionados = []
+
+                    for idx, organo in enumerate(lista_nombres_comites):
+                        with cols[idx]:
+                            chk = st.checkbox(
+                                organo, key=f"chk_{pais}_{organo}", value=True
+                            )
+                            if chk:
+                                organos_seleccionados.append(organo)
+
+                    mapa_pais_organos[pais] = organos_seleccionados
+                    st.markdown("---")
+
+                if st.button("💾 Guardar Catálogo y Presencia de Órganos"):
+                    catalogo_estructurado = [
+                        {"pais": p, "organos_permitidos": orgs}
+                        for p, orgs in mapa_pais_organos.items()
+                    ]
+
+                    if guardar_catalogo_paises(
+                        id_modelo_actual, catalogo_estructurado
+                    ):
+                        st.success(
+                            "🎉 ¡Catálogo de países y mapa de órganos guardado"
+                            " exitosamente!"
+                        )
+                        st.rerun()
+
+    # SORTEO AUTOMÁTICO
     with subtab_sorteo:
         st.markdown("### 🎲 Generador y Sorteo de Asignaciones")
         if st.button("🚀 CONFIRMAR Y EJECUTAR SORTEO DE PAÍSES"):
@@ -662,6 +730,7 @@ with tab_config:
             else:
                 st.error(msg_sorteo)
 
+    # DESIGNER DE CAMPOS DE FORMULARIO
     with subtab_formulario:
         st.markdown("### 📋 Diseñador de Campos Adicionales")
         campos_actuales = obtener_esquema_formulario(id_modelo_actual)
