@@ -1,28 +1,15 @@
+import random
+import firebase_admin
+from firebase_admin import credentials, firestore
 import pandas as pd
 import requests
 import streamlit as st
-from db import (
-    actualizar_estado_delegacion,
-    actualizar_estado_pago,
-    guardar_esquema_formulario,
-    guardar_parametros_comites,
-    obtener_delegaciones_por_modelo,
-    obtener_esquema_formulario,
-    obtener_integrantes_delegacion,
-    obtener_modelos_activos,
-    obtener_nominas_por_modelo,
-    obtener_pagos_pendientes,
-    obtener_parametros_comites,
-    obtener_todos_pagos,
-    procesar_acreditacion_forms,
-)
 
-# Configuración inicial del layout
+# Configuración de página
 st.set_page_config(
     page_title="Panel de Secretaría - Modelos ONU", page_icon="👑", layout="wide"
 )
 
-# Estilo personalizado para ocultar controles predeterminados de Streamlit
 hide_streamlit_style = """
     <style>
     #MainMenu {visibility: hidden;}
@@ -32,22 +19,319 @@ hide_streamlit_style = """
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
+# Inicialización Singleton de Firebase
+if not firebase_admin._apps:
+    cred = credentials.Certificate(dict(st.secrets["firebase"]))
+    firebase_admin.initialize_app(cred)
+
+db = firestore.client()
 API_URL = st.secrets["API_URL"]
 
 
+# ==========================================
+# FUNCIONES DE BASE DE DATOS (db.py)
+# ==========================================
+def obtener_modelos_activos():
+    try:
+        docs = db.collection("modelos").stream()
+        modelos = []
+        for doc in docs:
+            m = doc.to_dict()
+            m["id_modelo"] = doc.id
+            modelos.append(m)
+        return modelos
+    except Exception as e:
+        st.error(f"Error al cargar modelos desde Firestore: {e}")
+        return []
+
+
+def obtener_parametros_comites(id_modelo):
+    try:
+        doc = db.collection("configuracion").document(str(id_modelo)).get()
+        if doc.exists:
+            return doc.to_dict().get("parametros_comites", [])
+        return []
+    except Exception as e:
+        st.error(f"Error al leer parámetros de comités: {e}")
+        return []
+
+
+def guardar_parametros_comites(id_modelo, lista_comites):
+    try:
+        db.collection("configuracion").document(str(id_modelo)).set(
+            {"parametros_comites": lista_comites}, merge=True
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar parámetros de comités: {e}")
+        return False
+
+
+def obtener_esquema_formulario(id_modelo):
+    try:
+        doc = db.collection("configuracion").document(str(id_modelo)).get()
+        if doc.exists:
+            return doc.to_dict().get("campos_personalizados", [])
+        return []
+    except Exception as e:
+        st.error(f"Error al obtener esquema del formulario: {e}")
+        return []
+
+
+def guardar_esquema_formulario(id_modelo, lista_campos):
+    try:
+        db.collection("configuracion").document(str(id_modelo)).set(
+            {"campos_personalizados": lista_campos}, merge=True
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar esquema del formulario: {e}")
+        return False
+
+
+def obtener_catalogo_paises(id_modelo):
+    try:
+        doc = db.collection("configuracion").document(str(id_modelo)).get()
+        if doc.exists:
+            return doc.to_dict().get("catalogo_paises", [])
+        return []
+    except Exception as e:
+        st.error(f"Error al leer catálogo de países: {e}")
+        return []
+
+
+def guardar_catalogo_paises(id_modelo, lista_paises):
+    try:
+        db.collection("configuracion").document(str(id_modelo)).set(
+            {"catalogo_paises": lista_paises}, merge=True
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar catálogo de países: {e}")
+        return False
+
+
+def obtener_delegaciones_por_modelo(id_modelo=None):
+    try:
+        ref = db.collection("delegaciones")
+        if id_modelo:
+            docs = ref.where("id_modelo", "==", str(id_modelo)).stream()
+        else:
+            docs = ref.stream()
+
+        delegaciones = []
+        for doc in docs:
+            datos = doc.to_dict()
+            datos["id"] = doc.id
+            datos["id_delegacion"] = doc.id
+            delegaciones.append(datos)
+        return delegaciones
+    except Exception as e:
+        st.error(f"Error al consultar delegaciones: {e}")
+        return []
+
+
+def ejecutar_sorteo_automatico(id_modelo):
+    try:
+        paises_disponibles = obtener_catalogo_paises(id_modelo)
+        if not paises_disponibles:
+            return (
+                False,
+                "No hay un catálogo de países cargado para este modelo.",
+            )
+
+        comites_reglas = obtener_parametros_comites(id_modelo)
+        if not comites_reglas:
+            return False, "No se han parametrizado los comités para este modelo."
+
+        delegaciones = obtener_delegaciones_por_modelo(id_modelo)
+        if not delegaciones:
+            return False, "No hay instituciones registradas para sortear."
+
+        batch = db.batch()
+        total_asignaciones_creadas = 0
+
+        pozos_comites = {}
+        for c in comites_reglas:
+            organo = str(c.get("organo_comite")).strip()
+            lista_mezclada = paises_disponibles.copy()
+            random.shuffle(lista_mezclada)
+            pozos_comites[organo] = lista_mezclada
+
+        for del_doc in delegaciones:
+            email_docente = del_doc.get("id_delegacion")
+
+            for c in comites_reglas:
+                organo = str(c.get("organo_comite")).strip()
+                pozo = pozos_comites.get(organo, [])
+
+                if pozo:
+                    pais_asignado = pozo.pop(0)
+                    asig_id = (
+                        f"{email_docente}_{organo}".replace(" ", "_")
+                        .replace("/", "_")
+                        .lower()
+                    )
+                    doc_ref = (
+                        db.collection("delegaciones")
+                        .document(email_docente)
+                        .collection("asignaciones")
+                        .document(asig_id)
+                    )
+
+                    payload = {
+                        "id_modelo": id_modelo,
+                        "organo_comite": organo,
+                        "organo": organo,
+                        "pais": pais_asignado,
+                        "fecha_sorteo": firestore.SERVER_TIMESTAMP,
+                    }
+
+                    batch.set(doc_ref, payload, merge=True)
+                    total_asignaciones_creadas += 1
+
+        batch.commit()
+        return (
+            True,
+            f"🎉 Sorteo finalizado con éxito. Se generaron {total_asignaciones_creadas} asignaciones de bancas/países.",
+        )
+
+    except Exception as e:
+        return False, f"Error durante la ejecución del sorteo: {e}"
+
+
+def actualizar_estado_delegacion(id_delegacion, estado, motivo=""):
+    try:
+        payload = {"estado": estado}
+        if motivo:
+            payload["motivo_rechazo"] = motivo
+        db.collection("delegaciones").document(str(id_delegacion)).set(
+            payload, merge=True
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error al actualizar estado de la delegación: {e}")
+        return False
+
+
+def obtener_integrantes_delegacion(id_delegacion):
+    try:
+        docs = (
+            db.collection("delegaciones")
+            .document(str(id_delegacion))
+            .collection("integrantes")
+            .stream()
+        )
+        integrantes = []
+        for doc in docs:
+            d = doc.to_dict()
+            d["id"] = doc.id
+            integrantes.append(d)
+        return integrantes
+    except Exception as e:
+        st.error(f"Error al obtener integrantes: {e}")
+        return []
+
+
+def obtener_nominas_por_modelo(id_modelo=None):
+    delegaciones = obtener_delegaciones_por_modelo(id_modelo)
+    todas_nominas = []
+    for d in delegaciones:
+        id_del = d.get("id")
+        integrantes = obtener_integrantes_delegacion(id_del)
+        for i in integrantes:
+            i["id_delegacion"] = id_del
+            i["nombre_colegio"] = d.get("nombre_colegio", "Sin Nombre")
+            todas_nominas.append(i)
+    return todas_nominas
+
+
+def obtener_todos_pagos(id_modelo=None):
+    try:
+        ref = db.collection("pagos")
+        if id_modelo:
+            docs = ref.where("id_modelo", "==", str(id_modelo)).stream()
+        else:
+            docs = ref.stream()
+
+        pagos = []
+        for doc in docs:
+            p = doc.to_dict()
+            p["id_pago"] = doc.id
+            pagos.append(p)
+        return pagos
+    except Exception as e:
+        st.error(f"Error al consultar pagos: {e}")
+        return []
+
+
+def obtener_pagos_pendientes(id_modelo=None):
+    pagos = obtener_todos_pagos(id_modelo)
+    return [
+        p
+        for p in pagos
+        if str(p.get("estado_pago", "")).upper() == "PENDIENTE"
+    ]
+
+
+def actualizar_estado_pago(id_pago, nuevo_estado):
+    try:
+        db.collection("pagos").document(str(id_pago)).set(
+            {"estado_pago": nuevo_estado}, merge=True
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error al actualizar estado del pago: {e}")
+        return False
+
+
+def procesar_acreditacion_forms(df_forms, id_modelo):
+    nominas_oficiales = obtener_nominas_por_modelo(id_modelo)
+    dnis_oficiales = {
+        str(n.get("dni")).strip(): n for n in nominas_oficiales if n.get("dni")
+    }
+    dnis_acreditados_forms = set(
+        df_forms["DNI"].astype(str).str.strip().tolist()
+    )
+
+    total_nominados = len(dnis_oficiales)
+    acreditados_correctos = 0
+    no_registrados = []
+
+    for dni in dnis_acreditados_forms:
+        if dni in dnis_oficiales:
+            acreditados_correctos += 1
+            p = dnis_oficiales[dni]
+            db.collection("delegaciones").document(
+                p["id_delegacion"]
+            ).collection("integrantes").document(dni).set(
+                {"acreditado": True}, merge=True
+            )
+        else:
+            no_registrados.append(dni)
+
+    pct = (
+        round((acreditados_correctos / total_nominados) * 100, 2)
+        if total_nominados > 0
+        else 0
+    )
+
+    return {
+        "total_nominados": total_nominados,
+        "total_acreditados": acreditados_correctos,
+        "porcentaje": pct,
+        "no_registrados": no_registrados,
+    }
+
+
 def notificar_apps_script(action, data):
-    """Llama a Google Apps Script para gestionar los envíos de emails."""
     try:
         requests.post(API_URL, json={"action": action, "data": data}, timeout=5)
-    except Exception as e:
-        st.warning(
-            f"Operación guardada en Firestore, pero hubo un detalle en la"
-            f" notificación por mail: {e}"
-        )
+    except Exception:
+        pass
 
 
 def descargar_csv_para_excel(df, nombre_archivo):
-    """Genera un botón de descarga en formato CSV codificado para Excel."""
     df_clean = df.astype(str)
     csv = df_clean.to_csv(index=False).encode("utf-8-sig")
     return st.download_button(
@@ -59,9 +343,11 @@ def descargar_csv_para_excel(df, nombre_archivo):
     )
 
 
+# ==========================================
+# INTERFAZ SECRETARÍA
+# ==========================================
 st.title("👑 Panel de Control - Secretaría / Administración")
 
-# Autenticación requerida
 if "admin_logueado" not in st.session_state:
     st.session_state["admin_logueado"] = False
 
@@ -71,9 +357,7 @@ if not st.session_state["admin_logueado"]:
         pass_ingresada = st.text_input(
             "Contraseña de Administración:", type="password"
         )
-        btn_ingresar = st.form_submit_button("Ingresar al Panel")
-
-        if btn_ingresar:
+        if st.form_submit_button("Ingresar al Panel"):
             if pass_ingresada.strip() == st.secrets["admin_logueado"]:
                 st.session_state["admin_logueado"] = True
                 st.success("¡Acceso concedido!")
@@ -86,10 +370,15 @@ if st.sidebar.button("Cerrar Sesión Admin"):
     st.session_state["admin_logueado"] = False
     st.rerun()
 
-# Menú lateral para elegir el modelo a administrar
 modelos = obtener_modelos_activos()
-dict_modelos = {m["nombre_visible"]: m["id_modelo"] for m in modelos}
+if not modelos:
+    st.sidebar.warning(
+        "⚠️ No hay modelos creados en Firestore. Cargue un modelo en la"
+        " colección 'modelos'."
+    )
+    st.stop()
 
+dict_modelos = {m["nombre_visible"]: m["id_modelo"] for m in modelos}
 modelo_seleccionado = st.sidebar.selectbox(
     "📌 Seleccionar Modelo a Gestionar:", list(dict_modelos.keys())
 )
@@ -98,7 +387,6 @@ id_modelo_actual = dict_modelos[modelo_seleccionado]
 st.sidebar.markdown(f"**ID Modelo Activo:** `{id_modelo_actual}`")
 st.sidebar.markdown("---")
 
-# Definición de pestañas principales del sistema
 (
     tab_dash,
     tab_ficha,
@@ -117,7 +405,7 @@ st.sidebar.markdown("---")
     "⚙️ Configuración del Modelo",
 ])
 
-# 1. DASHBOARD GENERAL
+# 1. DASHBOARD
 with tab_dash:
     st.subheader(f"📊 Panel General — {modelo_seleccionado}")
     delegaciones = obtener_delegaciones_por_modelo(id_modelo_actual)
@@ -141,7 +429,6 @@ with tab_dash:
         st.metric("Pagos Pendientes", len(pagos_pendientes))
 
     st.markdown("---")
-    st.markdown("### 📋 Listado Rápido de Instituciones")
     if delegaciones:
         df_del = pd.DataFrame(delegaciones).astype(str)
         st.dataframe(df_del, use_container_width=True)
@@ -151,18 +438,13 @@ with tab_dash:
     else:
         st.info("No hay delegaciones registradas para este modelo.")
 
-# 2. FICHA NOMINAL POR ESCUELA
+# 2. FICHA NOMINAL
 with tab_ficha:
     st.subheader(f"🏫 Ficha Integral por Institución — {modelo_seleccionado}")
     delegaciones_ficha = obtener_delegaciones_por_modelo(id_modelo_actual)
 
-    if not delegaciones_ficha:
-        st.info("No hay escuelas registradas.")
-    else:
-        busqueda = st.text_input(
-            "🔍 Buscar por Nombre de Escuela o Código de Delegación:", ""
-        ).strip()
-
+    if delegaciones_ficha:
+        busqueda = st.text_input("🔍 Buscar por Nombre de Escuela o Email:").strip()
         escuelas_filtradas = [
             d
             for d in delegaciones_ficha
@@ -170,23 +452,17 @@ with tab_ficha:
             or busqueda.lower() in str(d.get("id", "")).lower()
         ]
 
-        if not escuelas_filtradas:
-            st.warning("No se encontraron instituciones que coincidan.")
-        else:
+        if escuelas_filtradas:
             opciones_escuelas = {
                 f"[{d.get('id')}] {d.get('nombre_colegio', 'Sin Nombre')}": d
                 for d in escuelas_filtradas
             }
             escuela_label = st.selectbox(
-                "Seleccionar Institución:",
-                list(opciones_escuelas.keys()),
-                key="select_escuela_ficha",
+                "Seleccionar Institución:", list(opciones_escuelas.keys())
             )
             escuela = opciones_escuelas[escuela_label]
             id_del = escuela.get("id")
 
-            st.markdown("---")
-            st.markdown("### 📄 Información Registrada en Firestore")
             cols_info = st.columns(3)
             with cols_info[0]:
                 st.markdown(
@@ -195,17 +471,11 @@ with tab_ficha:
                 st.markdown(
                     f"**📍 Dirección:** {escuela.get('direccion_escuela', '-')}"
                 )
-                st.markdown(f"**🆔 ID Delegación:** `{id_del}`")
-                st.markdown(
-                    f"**📌 Estado:** `{escuela.get('estado', 'REGISTRADO')}`"
-                )
+                st.markdown(f"**📧 Email / ID:** `{id_del}`")
             with cols_info[1]:
                 st.markdown(
                     "**👤 Responsable:**"
                     f" {escuela.get('docente_apellido_nombre', '-')}"
-                )
-                st.markdown(
-                    f"**📧 Email:** {escuela.get('docente_email', '-')}"
                 )
                 st.markdown(
                     f"**📱 Teléfono:** {escuela.get('docente_telefono', '-')}"
@@ -219,221 +489,85 @@ with tab_ficha:
                     f"**🔑 Clave Hash:** `{escuela.get('secret_hash', '-')}`"
                 )
 
-            with st.expander("🔍 Ver JSON del Documento"):
-                st.json(escuela)
-
             st.markdown("---")
-            st.markdown("### 👨‍🏫 Docentes Acompañantes")
             registros_escuela = obtener_integrantes_delegacion(id_del)
-
-            docentes_escuela = [
-                r
-                for r in registros_escuela
-                if r.get("rol_mnu") == "Docente Acompañante"
-            ]
-            alumnos_escuela = [
-                r
-                for r in registros_escuela
-                if r.get("rol_mnu") != "Docente Acompañante"
-            ]
-
-            if not docentes_escuela:
-                st.info("No hay docentes acompañantes registrados.")
-            else:
-                for doc in docentes_escuela:
-                    st.write(
-                        f"- **{doc.get('nombre', '')} {doc.get('apellido', '')}**"
-                        f" (DNI: {doc.get('dni', doc.get('id'))})"
-                    )
-
-            st.markdown("### 👥 Estudiantes en Nómina")
-            if not alumnos_escuela:
-                st.info("No hay participantes cargados en la nómina.")
-            else:
-                df_alumnos = pd.DataFrame(alumnos_escuela).astype(str)
+            if registros_escuela:
+                df_alumnos = pd.DataFrame(registros_escuela).astype(str)
                 st.dataframe(df_alumnos, use_container_width=True)
                 descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
 
-# 3. AUDITORÍA DE DOCUMENTACIÓN
+# 3. AUDITORÍA
 with tab_auditoria:
-    st.subheader(f"🔍 Auditoría y Aprobación de Legajos — {modelo_seleccionado}")
+    st.subheader(f"🔍 Auditoría y Aprobaciones — {modelo_seleccionado}")
     delegaciones_aud = obtener_delegaciones_por_modelo(id_modelo_actual)
-
-    if not delegaciones_aud:
-        st.info("No hay escuelas registradas.")
-    else:
+    if delegaciones_aud:
         opc_aud = {
             f"[{d.get('id')}] {d.get('nombre_colegio')} (Estado: {d.get('estado')})": d
             for d in delegaciones_aud
         }
         sel_aud_label = st.selectbox(
-            "Seleccionar Institución a Auditar:",
-            list(opc_aud.keys()),
-            key="select_auditoria",
+            "Seleccionar Institución a Auditar:", list(opc_aud.keys())
         )
         escuela_aud = opc_aud[sel_aud_label]
         id_del_aud = escuela_aud.get("id")
 
-        st.markdown("---")
-        st.write(
-            f"**Institución:** {escuela_aud.get('nombre_colegio')} | **Docente:** {escuela_aud.get('docente_apellido_nombre')} ({escuela_aud.get('docente_email')})"
-        )
-        st.write(
-            f"**Estado actual:** `{escuela_aud.get('estado', 'REGISTRADO')}`"
-        )
-
-        registros_aud = obtener_integrantes_delegacion(id_del_aud)
-
-        if not registros_aud:
-            st.warning("⚠️ Sin participantes cargados en la nómina.")
-        else:
-            st.markdown("### 📋 Documentación Presentada")
-            for idx, reg in enumerate(registros_aud):
-                st.markdown(
-                    f"**{idx+1}. {reg.get('nombre', '')} {reg.get('apellido', '')}**"
-                    f" (DNI: {reg.get('dni', reg.get('id'))})"
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button(
+                "✅ Aprobar Legajo Completo", key=f"btn_aprobar_{id_del_aud}"
+            ):
+                actualizar_estado_delegacion(
+                    id_del_aud, "DOCUMENTACION_COMPLETA"
                 )
-                col_e1, col_e2 = st.columns(2)
-                with col_e1:
-                    ficha_id = reg.get("ficha_medica_id") or "-"
-                    if ficha_id != "-":
-                        st.markdown(
-                            "📄 [Ver Ficha Médica en"
-                            f" Drive](https://drive.google.com/open?id={ficha_id})",
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.write("📄 Documento 1: No adjunto")
-                with col_e2:
-                    aut_id = reg.get("autorizacion_id") or "-"
-                    if aut_id != "-":
-                        st.markdown(
-                            "📝 [Ver Autorización en"
-                            f" Drive](https://drive.google.com/open?id={aut_id})",
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.write("📝 Documento 2: No adjunto")
-                st.markdown("---")
+                notificar_apps_script(
+                    "APROBAR_LEGAJO_ESCUELA", {"id_delegacion": id_del_aud}
+                )
+                st.success("Legajo aprobado.")
+                st.rerun()
 
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button(
-                    "✅ Aprobar Legajo Completo",
-                    key=f"btn_aprobar_{id_del_aud}",
-                    use_container_width=True,
-                ):
-                    actualizar_estado_delegacion(
-                        id_del_aud, "DOCUMENTACION_COMPLETA"
-                    )
-                    notificar_apps_script(
-                        "APROBAR_LEGAJO_ESCUELA", {"id_delegacion": id_del_aud}
-                    )
-                    st.success("Legajo aprobado y notificado.")
-                    st.rerun()
-
-            with col_btn2:
-                with st.expander("❌ Rechazar Legajo con Observaciones"):
-                    with st.form(key=f"form_rechazo_{id_del_aud}"):
-                        motivo_rechazo = st.text_area(
-                            "Indique el motivo del rechazo:"
+        with col_btn2:
+            with st.expander("❌ Rechazar Legajo"):
+                with st.form(key=f"form_rechazo_{id_del_aud}"):
+                    motivo = st.text_area("Motivo del rechazo:")
+                    if st.form_submit_button("Confirmar Rechazo"):
+                        actualizar_estado_delegacion(
+                            id_del_aud, "RECHAZADO", motivo
                         )
-                        btn_enviar_rechazo = st.form_submit_button(
-                            "Confirmar Rechazo"
+                        notificar_apps_script(
+                            "RECHAZAR_LEGAJO_ESCUELA",
+                            {"id_delegacion": id_del_aud, "motivo": motivo},
                         )
-                        if btn_enviar_rechazo:
-                            if not motivo_rechazo.strip():
-                                st.error("Debe ingresar un motivo.")
-                            else:
-                                actualizar_estado_delegacion(
-                                    id_del_aud, "RECHAZADO", motivo_rechazo
-                                )
-                                notificar_apps_script(
-                                    "RECHAZAR_LEGAJO_ESCUELA",
-                                    {
-                                        "id_delegacion": id_del_aud,
-                                        "motivo": motivo_rechazo,
-                                    },
-                                )
-                                st.warning("Legajo rechazado y notificado.")
-                                st.rerun()
+                        st.warning("Legajo rechazado.")
+                        st.rerun()
 
-# 4. GESTIÓN DE COMPROBANTES DE PAGO
+# 4. PAGOS
 with tab_pagos:
     st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
     pagos_pendientes = obtener_pagos_pendientes(id_modelo_actual)
-    pagos_todos = obtener_todos_pagos(id_modelo_actual)
+    if pagos_pendientes:
+        for p in pagos_pendientes:
+            id_pago = p.get("id_pago")
+            col_p1, col_p2, col_p3 = st.columns([2, 2, 1])
+            with col_p1:
+                st.write(
+                    f"**Delegación:** `{p.get('id_delegacion')}` | **Monto:**"
+                    f" ${p.get('monto')}"
+                )
+            with col_p2:
+                if p.get("drive_file_url"):
+                    st.markdown(f"🔗 [Ver Comprobante]({p.get('drive_file_url')})")
+            with col_p3:
+                if st.button("Aprobar", key=f"ap_{id_pago}"):
+                    actualizar_estado_pago(id_pago, "APROBADO")
+                    st.rerun()
+                if st.button("Rechazar", key=f"rec_{id_pago}"):
+                    actualizar_estado_pago(id_pago, "RECHAZADO")
+                    st.rerun()
 
-    sub1, sub2 = st.tabs(["⏳ Pendientes", "✅ Historial"])
-    with sub1:
-        if not pagos_pendientes:
-            st.success("🎉 ¡No hay pagos pendientes!")
-        else:
-            for p in pagos_pendientes:
-                id_pago = p.get("id_pago")
-                with st.container():
-                    col_p1, col_p2, col_p3 = st.columns([2, 2, 1])
-                    with col_p1:
-                        st.write(f"**ID Pago:** `{id_pago}`")
-                        st.write(
-                            "**🏛️ Delegación:**"
-                            f" `{p.get('id_delegacion', '-')}`"
-                        )
-                        st.write(f"**💵 Monto:** **${p.get('monto', 0)}**")
-                    with col_p2:
-                        url_comp = p.get("drive_file_url")
-                        if url_comp:
-                            st.markdown(
-                                f"🔗 [Ver Comprobante]({url_comp})",
-                                unsafe_allow_html=True,
-                            )
-                        st.write(
-                            f"**Estado:** `{p.get('estado_pago', 'PENDIENTE')}`"
-                        )
-                    with col_p3:
-                        if st.button("Aprobar", key=f"ap_{id_pago}"):
-                            actualizar_estado_pago(id_pago, "APROBADO")
-                            notificar_apps_script(
-                                "CAMBIAR_ESTADO_PAGO",
-                                {"id_pago": id_pago, "nuevo_estado": "APROBADO"},
-                            )
-                            st.success("Pago aprobado.")
-                            st.rerun()
-                        if st.button("Rechazar", key=f"rec_{id_pago}"):
-                            actualizar_estado_pago(id_pago, "RECHAZADO")
-                            notificar_apps_script(
-                                "CAMBIAR_ESTADO_PAGO",
-                                {
-                                    "id_pago": id_pago,
-                                    "nuevo_estado": "RECHAZADO",
-                                },
-                            )
-                            st.warning("Pago rechazado.")
-                            st.rerun()
-                    st.markdown("---")
-
-    with sub2:
-        if pagos_todos:
-            df_pagos = pd.DataFrame(pagos_todos).astype(str)
-            pagos_aprobados = df_pagos[
-                df_pagos["estado_pago"].str.upper() == "APROBADO"
-            ]
-            total_recaudado = (
-                pagos_aprobados["monto"].astype(float).sum()
-                if not pagos_aprobados.empty
-                else 0
-            )
-            st.metric("Total Recaudado", f"${total_recaudado:,.2f}")
-            st.dataframe(df_pagos, use_container_width=True)
-            descargar_csv_para_excel(
-                df_pagos, f"historial_pagos_{id_modelo_actual}"
-            )
-
-# 5. ALERTAS MÉDICAS Y DE SALUD
+# 5. ALERTAS MÉDICAS
 with tab_medicos:
     st.subheader(f"🩺 Reporte de Salud — {modelo_seleccionado}")
     nominas_medicas = obtener_nominas_por_modelo(id_modelo_actual)
-
     if nominas_medicas:
         alerta_nominas = [
             n
@@ -442,81 +576,41 @@ with tab_medicos:
             and str(n.get("alergias_medicas")).strip().lower()
             not in ["ninguna", "-", ""]
         ]
-        if not alerta_nominas:
-            st.success("✅ Sin observaciones médicas.")
-        else:
-            st.warning(
-                f"⚠️ Se encontraron {len(alerta_nominas)} registros con"
-                " observaciones:"
-            )
+        if alerta_nominas:
             df_alertas = pd.DataFrame(alerta_nominas).astype(str)
             st.dataframe(df_alertas, use_container_width=True)
-            descargar_csv_para_excel(
-                df_alertas, f"reporte_alertas_medicas_{id_modelo_actual}"
-            )
 
-# 6. ACREDITACIÓN EN VIVO VIA GOOGLE FORMS
+# 6. ACREDITACIÓN GOOGLE FORMS
 with tab_acred:
     st.subheader(f"🎫 Acreditaciones Google Forms — {modelo_seleccionado}")
     file_forms = st.file_uploader(
-        "Cargar Excel/CSV de respuestas de Google Forms", type=["xlsx", "csv"]
+        "Cargar respuestas de Google Forms", type=["xlsx", "csv"]
     )
-
     if file_forms:
         df_f = (
             pd.read_csv(file_forms)
             if file_forms.name.endswith(".csv")
             else pd.read_excel(file_forms)
         )
-        if "DNI" not in df_f.columns:
-            st.error("El archivo debe incluir una columna llamada 'DNI'.")
-        else:
-            if st.button("🔍 Auditar y Procesar Acreditaciones"):
-                res = procesar_acreditacion_forms(df_f, id_modelo_actual)
-                col_a1, col_a2, col_a3 = st.columns(3)
-                with col_a1:
-                    st.metric("Total en Nómina", res["total_nominados"])
-                with col_a2:
-                    st.metric("Acreditados Correctos", res["total_acreditados"])
-                with col_a3:
-                    st.metric(
-                        "% Acreditación del Modelo", f"{res['porcentaje']}%"
-                    )
+        if "DNI" in df_f.columns and st.button(
+            "🔍 Auditar y Procesar Acreditaciones"
+        ):
+            res = procesar_acreditacion_forms(df_f, id_modelo_actual)
+            st.metric("% Acreditación del Modelo", f"{res['porcentaje']}%")
 
-                st.markdown("---")
-                no_reg = res["no_registrados"]
-                if no_reg:
-                    st.warning(
-                        f"⚠️ {len(no_reg)} DNI acreditados NO figuran en la"
-                        " nómina oficial:"
-                    )
-                    st.write(no_reg)
-                    if st.button("📧 Notificar por Mail a No Registrados"):
-                        for dni_nr in no_reg:
-                            notificar_apps_script(
-                                "NOTIFICAR_ACREDITADO_NO_REGISTRADO",
-                                {"dni": dni_nr, "modelo": modelo_seleccionado},
-                            )
-                        st.info("Notificaciones enviadas.")
-                else:
-                    st.success("🎉 ¡Todos los asistidos figuran en la nómina!")
-
-# 7. MÓDULO DE CONFIGURACIÓN DEL MODELO
+# 7. CONFIGURACIÓN COMPLETA
 with tab_config:
     st.subheader(f"⚙️ Configuración del Modelo — {modelo_seleccionado}")
 
-    subtab_comites, subtab_formulario = st.tabs(
-        ["🏛️ Parámetros de Comités", "📋 Campos del Formulario"]
-    )
+    subtab_comites, subtab_catalogo, subtab_sorteo, subtab_formulario = st.tabs([
+        "🏛️ Parámetros de Comités",
+        "🌍 Catálogo de Países",
+        "🎲 Sorteo Automático",
+        "📋 Campos del Formulario",
+    ])
 
-    # REPLICACIÓN EXACTA DE LA TABLA PARAMETROS_COMITES DEL GOOGLE SHEET
     with subtab_comites:
         st.markdown("### 🏛️ Estructura de Órganos y Comités")
-        st.write(
-            "Administra las secciones, integrantes por banca y reglas del"
-            " sorteo para este modelo."
-        )
-
         comites_actuales = obtener_parametros_comites(id_modelo_actual)
         df_comites = (
             pd.DataFrame(comites_actuales)
@@ -533,49 +627,43 @@ with tab_config:
         )
 
         df_comites_editado = st.data_editor(
-            df_comites,
-            num_rows="dynamic",
-            column_config={
-                "clave_seccion": st.column_config.TextColumn(
-                    "Clave Sección (ej: c/consejo seg+ecosoc)"
-                ),
-                "organo_comite": st.column_config.TextColumn(
-                    "Órgano / Comité (ej: Embajador, AG1, ECOSOC)"
-                ),
-                "integrantes_por_banca": st.column_config.NumberColumn(
-                    "Integrantes por Banca", default=1, min_value=1
-                ),
-                "requiere_marca": st.column_config.SelectboxColumn(
-                    "Regla de Marca",
-                    options=["ALWAYS", "REQUIRES_MARCA", "SINGLE"],
-                    default="ALWAYS",
-                ),
-                "max_delegaciones_seccion": st.column_config.NumberColumn(
-                    "Máx Delegaciones Sección", default=1, min_value=1
-                ),
-            },
-            use_container_width=True,
-            key="editor_parametros_comites",
+            df_comites, num_rows="dynamic", key="editor_parametros_comites"
         )
-
         if st.button("💾 Guardar Parámetros de Comités"):
-            lista_comites_nuevos = df_comites_editado.to_dict(orient="records")
-            if guardar_parametros_comites(
-                id_modelo_actual, lista_comites_nuevos
-            ):
-                st.success(
-                    "¡Parámetros de comités actualizados en Firestore!"
-                )
-                st.rerun()
+            guardar_parametros_comites(
+                id_modelo_actual, df_comites_editado.to_dict(orient="records")
+            )
+            st.success("Parámetros actualizados.")
+            st.rerun()
 
-    # DISEÑADOR DINÁMICO DE CAMPOS ADICIONALES DEL FORMULARIO
+    with subtab_catalogo:
+        st.markdown("### 🌍 Catálogo Maestro de Países Disponibles")
+        catalogo_actual = obtener_catalogo_paises(id_modelo_actual)
+        paises_input = st.text_area(
+            "Lista de Países (Un país por línea):",
+            value="\n".join(catalogo_actual) if catalogo_actual else "",
+            height=250,
+        )
+        if st.button("💾 Guardar Catálogo de Países"):
+            lista_paises = [
+                p.strip() for p in paises_input.split("\n") if p.strip()
+            ]
+            guardar_catalogo_paises(id_modelo_actual, lista_paises)
+            st.success("Catálogo guardado.")
+            st.rerun()
+
+    with subtab_sorteo:
+        st.markdown("### 🎲 Generador y Sorteo de Asignaciones")
+        if st.button("🚀 CONFIRMAR Y EJECUTAR SORTEO DE PAÍSES"):
+            ok_sorteo, msg_sorteo = ejecutar_sorteo_automatico(id_modelo_actual)
+            if ok_sorteo:
+                st.balloons()
+                st.success(msg_sorteo)
+            else:
+                st.error(msg_sorteo)
+
     with subtab_formulario:
         st.markdown("### 📋 Diseñador de Campos Adicionales")
-        st.write(
-            "Agrega o elimina campos personalizados para que los docentes/estudiantes"
-            " completen al inscribirse."
-        )
-
         campos_actuales = obtener_esquema_formulario(id_modelo_actual)
         df_campos = (
             pd.DataFrame(campos_actuales)
@@ -591,29 +679,11 @@ with tab_config:
         )
 
         df_fields_editado = st.data_editor(
-            df_campos,
-            num_rows="dynamic",
-            column_config={
-                "nombre_campo": st.column_config.TextColumn("Nombre del Campo"),
-                "tipo_dato": st.column_config.SelectboxColumn(
-                    "Tipo de Entrada",
-                    options=["texto", "numero", "seleccion", "booleano"],
-                ),
-                "opciones_separadas_por_coma": st.column_config.TextColumn(
-                    "Opciones (solo para Selección)"
-                ),
-                "es_requerido": st.column_config.CheckboxColumn(
-                    "¿Obligatorio?", default=False
-                ),
-            },
-            use_container_width=True,
-            key="editor_esquema_formulario",
+            df_campos, num_rows="dynamic", key="editor_esquema_formulario"
         )
-
         if st.button("💾 Guardar Campos del Formulario"):
-            lista_nuevos_campos = df_fields_editado.to_dict(orient="records")
-            if guardar_esquema_formulario(
-                id_modelo_actual, lista_nuevos_campos
-            ):
-                st.success("¡Estructura de formulario guardada con éxito!")
-                st.rerun()
+            guardar_esquema_formulario(
+                id_modelo_actual, df_fields_editado.to_dict(orient="records")
+            )
+            st.success("Formulario actualizado.")
+            st.rerun()
