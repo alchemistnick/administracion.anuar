@@ -1,3 +1,4 @@
+import random
 import firebase_admin
 from firebase_admin import credentials, firestore
 import pandas as pd
@@ -16,7 +17,7 @@ db = firestore.client()
 
 
 def obtener_modelos_activos():
-    """Obtiene la lista de modelos desde Firestore o genera una lista de respaldo."""
+    """Recupera la lista de modelos registrados desde Firestore."""
     try:
         docs = db.collection("modelos").stream()
         modelos = []
@@ -24,25 +25,14 @@ def obtener_modelos_activos():
             m = doc.to_dict()
             m["id_modelo"] = doc.id
             modelos.append(m)
-
-        if not modelos:
-            return [
-                {
-                    "id_modelo": "MONUCBA_2026",
-                    "nombre_visible": "MONUCBA 2026",
-                },
-                {"id_modelo": "CATE_2026", "nombre_visible": "Modelo CATE 2026"},
-            ]
         return modelos
     except Exception as e:
         st.error(f"Error al cargar modelos desde Firestore: {e}")
-        return [
-            {"id_modelo": "MONUCBA_2026", "nombre_visible": "MONUCBA 2026"}
-        ]
+        return []
 
 
 def obtener_parametros_comites(id_modelo):
-    """Obtiene la lista de comités u órganos configurados para el modelo."""
+    """Obtiene los comités/órganos del modelo (replicando la estructura PARAMETROS_COMITES)."""
     try:
         doc = db.collection("configuracion").document(str(id_modelo)).get()
         if doc.exists:
@@ -54,7 +44,7 @@ def obtener_parametros_comites(id_modelo):
 
 
 def guardar_parametros_comites(id_modelo, lista_comites):
-    """Guarda la estructura de comités (replicando la tabla PARAMETROS_COMITES)."""
+    """Guarda la lista de comités del modelo."""
     try:
         db.collection("configuracion").document(str(id_modelo)).set(
             {"parametros_comites": lista_comites}, merge=True
@@ -66,14 +56,14 @@ def guardar_parametros_comites(id_modelo, lista_comites):
 
 
 def obtener_esquema_formulario(id_modelo):
-    """Recupera los campos personalizados para los formularios de inscripción."""
+    """Recupera los campos personalizados para el formulario de inscripción."""
     try:
         doc = db.collection("configuracion").document(str(id_modelo)).get()
         if doc.exists:
             return doc.to_dict().get("campos_personalizados", [])
         return []
     except Exception as e:
-        st.error(f"Error al obtener esquema de formulario: {e}")
+        st.error(f"Error al obtener esquema del formulario: {e}")
         return []
 
 
@@ -85,12 +75,115 @@ def guardar_esquema_formulario(id_modelo, lista_campos):
         )
         return True
     except Exception as e:
-        st.error(f"Error al guardar esquema de formulario: {e}")
+        st.error(f"Error al guardar esquema del formulario: {e}")
         return False
 
 
 # ==========================================
-# 2. DELEGACIONES Y ESCUELAS
+# 2. CATÁLOGO MAESTRO Y SORTEO AUTOMÁTICO
+# ==========================================
+
+
+def obtener_catalogo_paises(id_modelo):
+    """Obtiene la lista maestra de países/bancas disponibles para el modelo."""
+    try:
+        doc = db.collection("configuracion").document(str(id_modelo)).get()
+        if doc.exists:
+            return doc.to_dict().get("catalogo_paises", [])
+        return []
+    except Exception as e:
+        st.error(f"Error al leer catálogo de países: {e}")
+        return []
+
+
+def guardar_catalogo_paises(id_modelo, lista_paises):
+    """Guarda la lista maestra de países disponibles."""
+    try:
+        db.collection("configuracion").document(str(id_modelo)).set(
+            {"catalogo_paises": lista_paises}, merge=True
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar catálogo de países: {e}")
+        return False
+
+
+def ejecutar_sorteo_automatico(id_modelo):
+    """Ejecuta el sorteo aleatorio de países/bancas asignando a cada escuela
+
+    los países del catálogo sin repetirlos por comité.
+    """
+    try:
+        paises_disponibles = obtener_catalogo_paises(id_modelo)
+        if not paises_disponibles:
+            return (
+                False,
+                "No hay un catálogo de países cargado para este modelo.",
+            )
+
+        comites_reglas = obtener_parametros_comites(id_modelo)
+        if not comites_reglas:
+            return False, "No se han parametrizado los comités para este modelo."
+
+        delegaciones = obtener_delegaciones_por_modelo(id_modelo)
+        if not delegaciones:
+            return False, "No hay instituciones registradas para sortear."
+
+        batch = db.batch()
+        total_asignaciones_creadas = 0
+
+        pozos_comites = {}
+        for c in comites_reglas:
+            organo = str(c.get("organo_comite")).strip()
+            lista_mezclada = paises_disponibles.copy()
+            random.shuffle(lista_mezclada)
+            pozos_comites[organo] = lista_mezclada
+
+        for del_doc in delegaciones:
+            email_docente = del_doc.get("id_delegacion")
+
+            for c in comites_reglas:
+                organo = str(c.get("organo_comite")).strip()
+                pozo = pozos_comites.get(organo, [])
+
+                if pozo:
+                    pais_asignado = pozo.pop(0)
+
+                    asig_id = (
+                        f"{email_docente}_{organo}".replace(" ", "_")
+                        .replace("/", "_")
+                        .lower()
+                    )
+                    doc_ref = (
+                        db.collection("delegaciones")
+                        .document(email_docente)
+                        .collection("asignaciones")
+                        .document(asig_id)
+                    )
+
+                    payload = {
+                        "id_modelo": id_modelo,
+                        "organo_comite": organo,
+                        "organo": organo,
+                        "pais": pais_asignado,
+                        "fecha_sorteo": firestore.SERVER_TIMESTAMP,
+                    }
+
+                    batch.set(doc_ref, payload, merge=True)
+                    total_asignaciones_creadas += 1
+
+        batch.commit()
+        return (
+            True,
+            f"🎉 Sorteo finalizado con éxito. Se generaron {total_asignaciones_creadas} asignaciones de bancas/países.",
+        )
+
+    except Exception as e:
+        return False, f"Error durante la ejecución del sorteo: {e}"
+
+
+# ==========================================
+# 3. DELEGACIONES, INTEGRANTES Y PAGOS
 # ==========================================
 
 
@@ -116,7 +209,7 @@ def obtener_delegaciones_por_modelo(id_modelo=None):
 
 
 def actualizar_estado_delegacion(id_delegacion, estado, motivo=""):
-    """Actualiza el estado de aprobación/rechazo del legajo de una institución."""
+    """Actualiza el estado de aprobación/rechazo de un legajo."""
     try:
         payload = {"estado": estado}
         if motivo:
@@ -130,13 +223,8 @@ def actualizar_estado_delegacion(id_delegacion, estado, motivo=""):
         return False
 
 
-# ==========================================
-# 3. INTEGRANTES Y NÓMINAS
-# ==========================================
-
-
 def obtener_integrantes_delegacion(id_delegacion):
-    """Recupera los participantes pertenecientes a una delegación."""
+    """Recupera los integrantes pertenecientes a una delegación."""
     try:
         docs = (
             db.collection("delegaciones")
@@ -169,11 +257,6 @@ def obtener_nominas_por_modelo(id_modelo=None):
     return todas_nominas
 
 
-# ==========================================
-# 4. GESTIÓN DE PAGOS
-# ==========================================
-
-
 def obtener_todos_pagos(id_modelo=None):
     """Obtiene el historial de comprobantes de pago."""
     try:
@@ -195,7 +278,7 @@ def obtener_todos_pagos(id_modelo=None):
 
 
 def obtener_pagos_pendientes(id_modelo=None):
-    """Filtra únicamente los pagos pendientes de revisión."""
+    """Filtra los pagos pendientes de revisión."""
     pagos = obtener_todos_pagos(id_modelo)
     return [
         p
@@ -205,7 +288,7 @@ def obtener_pagos_pendientes(id_modelo=None):
 
 
 def actualizar_estado_pago(id_pago, nuevo_estado):
-    """Actualiza el estado de aprobación o rechazo de un comprobante de pago."""
+    """Actualiza el estado de un comprobante de pago."""
     try:
         db.collection("pagos").document(str(id_pago)).set(
             {"estado_pago": nuevo_estado}, merge=True
@@ -214,11 +297,6 @@ def actualizar_estado_pago(id_pago, nuevo_estado):
     except Exception as e:
         st.error(f"Error al actualizar estado del pago: {e}")
         return False
-
-
-# ==========================================
-# 5. AUDITORÍA DE ACREDITACIÓN EN VIVO
-# ==========================================
 
 
 def procesar_acreditacion_forms(df_forms, id_modelo):
