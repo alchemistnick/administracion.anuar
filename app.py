@@ -5,20 +5,24 @@ from db import (
     actualizar_estado_delegacion,
     actualizar_estado_pago,
     guardar_esquema_formulario,
+    guardar_parametros_comites,
     obtener_delegaciones_por_modelo,
     obtener_esquema_formulario,
     obtener_integrantes_delegacion,
     obtener_modelos_activos,
     obtener_nominas_por_modelo,
     obtener_pagos_pendientes,
+    obtener_parametros_comites,
     obtener_todos_pagos,
     procesar_acreditacion_forms,
 )
 
+# Configuración inicial del layout
 st.set_page_config(
     page_title="Panel de Secretaría - Modelos ONU", page_icon="👑", layout="wide"
 )
 
+# Estilo personalizado para ocultar controles predeterminados de Streamlit
 hide_streamlit_style = """
     <style>
     #MainMenu {visibility: hidden;}
@@ -32,18 +36,18 @@ API_URL = st.secrets["API_URL"]
 
 
 def notificar_apps_script(action, data):
-    """Envia eventos de notificación a Google Apps Script."""
+    """Llama a Google Apps Script para gestionar los envíos de emails."""
     try:
         requests.post(API_URL, json={"action": action, "data": data}, timeout=5)
     except Exception as e:
         st.warning(
             f"Operación guardada en Firestore, pero hubo un detalle en la"
-            f" notificación: {e}"
+            f" notificación por mail: {e}"
         )
 
 
 def descargar_csv_para_excel(df, nombre_archivo):
-    """Genera botón de descarga compatible con Excel."""
+    """Genera un botón de descarga en formato CSV codificado para Excel."""
     df_clean = df.astype(str)
     csv = df_clean.to_csv(index=False).encode("utf-8-sig")
     return st.download_button(
@@ -57,7 +61,7 @@ def descargar_csv_para_excel(df, nombre_archivo):
 
 st.title("👑 Panel de Control - Secretaría / Administración")
 
-# Control de Acceso
+# Autenticación requerida
 if "admin_logueado" not in st.session_state:
     st.session_state["admin_logueado"] = False
 
@@ -82,7 +86,7 @@ if st.sidebar.button("Cerrar Sesión Admin"):
     st.session_state["admin_logueado"] = False
     st.rerun()
 
-# Selector de Modelo Activo
+# Menú lateral para elegir el modelo a administrar
 modelos = obtener_modelos_activos()
 dict_modelos = {m["nombre_visible"]: m["id_modelo"] for m in modelos}
 
@@ -94,7 +98,7 @@ id_modelo_actual = dict_modelos[modelo_seleccionado]
 st.sidebar.markdown(f"**ID Modelo Activo:** `{id_modelo_actual}`")
 st.sidebar.markdown("---")
 
-# Estructura de Pestañas
+# Definición de pestañas principales del sistema
 (
     tab_dash,
     tab_ficha,
@@ -110,10 +114,10 @@ st.sidebar.markdown("---")
     "💰 Gestión de Pagos",
     "🩺 Alertas Médicas",
     "🎫 Control de Acreditación",
-    "⚙️ Configuración de Formulario",
+    "⚙️ Configuración del Modelo",
 ])
 
-# 1. DASHBOARD
+# 1. DASHBOARD GENERAL
 with tab_dash:
     st.subheader(f"📊 Panel General — {modelo_seleccionado}")
     delegaciones = obtener_delegaciones_por_modelo(id_modelo_actual)
@@ -147,7 +151,7 @@ with tab_dash:
     else:
         st.info("No hay delegaciones registradas para este modelo.")
 
-# 2. FICHA NOMINAL CON BÚSQUEDA AVANZADA
+# 2. FICHA NOMINAL POR ESCUELA
 with tab_ficha:
     st.subheader(f"🏫 Ficha Integral por Institución — {modelo_seleccionado}")
     delegaciones_ficha = obtener_delegaciones_por_modelo(id_modelo_actual)
@@ -167,7 +171,7 @@ with tab_ficha:
         ]
 
         if not escuelas_filtradas:
-            st.warning("No se encontraron coincidencias.")
+            st.warning("No se encontraron instituciones que coincidan.")
         else:
             opciones_escuelas = {
                 f"[{d.get('id')}] {d.get('nombre_colegio', 'Sin Nombre')}": d
@@ -215,7 +219,7 @@ with tab_ficha:
                     f"**🔑 Clave Hash:** `{escuela.get('secret_hash', '-')}`"
                 )
 
-            with st.expander("🔍 Ver todos los atributos (JSON)"):
+            with st.expander("🔍 Ver JSON del Documento"):
                 st.json(escuela)
 
             st.markdown("---")
@@ -244,15 +248,15 @@ with tab_ficha:
 
             st.markdown("### 👥 Estudiantes en Nómina")
             if not alumnos_escuela:
-                st.info("No hay participantes en la nómina.")
+                st.info("No hay participantes cargados en la nómina.")
             else:
                 df_alumnos = pd.DataFrame(alumnos_escuela).astype(str)
                 st.dataframe(df_alumnos, use_container_width=True)
                 descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
 
-# 3. AUDITORÍA
+# 3. AUDITORÍA DE DOCUMENTACIÓN
 with tab_auditoria:
-    st.subheader(f"🔍 Auditoría y Aprobaciones — {modelo_seleccionado}")
+    st.subheader(f"🔍 Auditoría y Aprobación de Legajos — {modelo_seleccionado}")
     delegaciones_aud = obtener_delegaciones_por_modelo(id_modelo_actual)
 
     if not delegaciones_aud:
@@ -281,7 +285,7 @@ with tab_auditoria:
         registros_aud = obtener_integrantes_delegacion(id_del_aud)
 
         if not registros_aud:
-            st.warning("⚠️ Sin participantes en nómina.")
+            st.warning("⚠️ Sin participantes cargados en la nómina.")
         else:
             st.markdown("### 📋 Documentación Presentada")
             for idx, reg in enumerate(registros_aud):
@@ -294,7 +298,7 @@ with tab_auditoria:
                     ficha_id = reg.get("ficha_medica_id") or "-"
                     if ficha_id != "-":
                         st.markdown(
-                            "📄 [Ver Ficha Medica"
+                            "📄 [Ver Ficha Médica en"
                             f" Drive](https://drive.google.com/open?id={ficha_id})",
                             unsafe_allow_html=True,
                         )
@@ -304,7 +308,7 @@ with tab_auditoria:
                     aut_id = reg.get("autorizacion_id") or "-"
                     if aut_id != "-":
                         st.markdown(
-                            "📝 [Ver Autorización"
+                            "📝 [Ver Autorización en"
                             f" Drive](https://drive.google.com/open?id={aut_id})",
                             unsafe_allow_html=True,
                         )
@@ -329,7 +333,7 @@ with tab_auditoria:
                     st.rerun()
 
             with col_btn2:
-                with st.expander("❌ Rechazar Legajo"):
+                with st.expander("❌ Rechazar Legajo con Observaciones"):
                     with st.form(key=f"form_rechazo_{id_del_aud}"):
                         motivo_rechazo = st.text_area(
                             "Indique el motivo del rechazo:"
@@ -339,7 +343,7 @@ with tab_auditoria:
                         )
                         if btn_enviar_rechazo:
                             if not motivo_rechazo.strip():
-                                st.error("Ingrese un motivo.")
+                                st.error("Debe ingresar un motivo.")
                             else:
                                 actualizar_estado_delegacion(
                                     id_del_aud, "RECHAZADO", motivo_rechazo
@@ -354,7 +358,7 @@ with tab_auditoria:
                                 st.warning("Legajo rechazado y notificado.")
                                 st.rerun()
 
-# 4. PAGOS
+# 4. GESTIÓN DE COMPROBANTES DE PAGO
 with tab_pagos:
     st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
     pagos_pendientes = obtener_pagos_pendientes(id_modelo_actual)
@@ -425,7 +429,7 @@ with tab_pagos:
                 df_pagos, f"historial_pagos_{id_modelo_actual}"
             )
 
-# 5. ALERTAS MÉDICAS
+# 5. ALERTAS MÉDICAS Y DE SALUD
 with tab_medicos:
     st.subheader(f"🩺 Reporte de Salud — {modelo_seleccionado}")
     nominas_medicas = obtener_nominas_por_modelo(id_modelo_actual)
@@ -439,11 +443,11 @@ with tab_medicos:
             not in ["ninguna", "-", ""]
         ]
         if not alerta_nominas:
-            st.success("✅ Sin alertas médicas.")
+            st.success("✅ Sin observaciones médicas.")
         else:
             st.warning(
-                f"⚠️ Se encontraron {len(alerta_nominas)} observaciones"
-                " médicas:"
+                f"⚠️ Se encontraron {len(alerta_nominas)} registros con"
+                " observaciones:"
             )
             df_alertas = pd.DataFrame(alerta_nominas).astype(str)
             st.dataframe(df_alertas, use_container_width=True)
@@ -451,11 +455,11 @@ with tab_medicos:
                 df_alertas, f"reporte_alertas_medicas_{id_modelo_actual}"
             )
 
-# 6. ACREDITACIÓN VIA GOOGLE FORMS
+# 6. ACREDITACIÓN EN VIVO VIA GOOGLE FORMS
 with tab_acred:
     st.subheader(f"🎫 Acreditaciones Google Forms — {modelo_seleccionado}")
     file_forms = st.file_uploader(
-        "Cargar Excel/CSV con asistencias de Google Forms", type=["xlsx", "csv"]
+        "Cargar Excel/CSV de respuestas de Google Forms", type=["xlsx", "csv"]
     )
 
     if file_forms:
@@ -465,9 +469,9 @@ with tab_acred:
             else pd.read_excel(file_forms)
         )
         if "DNI" not in df_f.columns:
-            st.error("El archivo debe contener la columna 'DNI'.")
+            st.error("El archivo debe incluir una columna llamada 'DNI'.")
         else:
-            if st.button("🔍 Procesar y Auditar Acreditaciones"):
+            if st.button("🔍 Auditar y Procesar Acreditaciones"):
                 res = procesar_acreditacion_forms(df_f, id_modelo_actual)
                 col_a1, col_a2, col_a3 = st.columns(3)
                 with col_a1:
@@ -487,7 +491,7 @@ with tab_acred:
                         " nómina oficial:"
                     )
                     st.write(no_reg)
-                    if st.button("📧 Enviar Correo a DNI No Registrados"):
+                    if st.button("📧 Notificar por Mail a No Registrados"):
                         for dni_nr in no_reg:
                             notificar_apps_script(
                                 "NOTIFICAR_ACREDITADO_NO_REGISTRADO",
@@ -497,53 +501,119 @@ with tab_acred:
                 else:
                     st.success("🎉 ¡Todos los asistidos figuran en la nómina!")
 
-# 7. CONFIGURACIÓN DINÁMICA DE FORMULARIO
+# 7. MÓDULO DE CONFIGURACIÓN DEL MODELO
 with tab_config:
-    st.subheader(
-        f"⚙️ Diseñador de Campos de Formulario — {modelo_seleccionado}"
-    )
-    st.write(
-        "Agrega o elimina los campos requeridos para las inscripciones de este"
-        " modelo."
+    st.subheader(f"⚙️ Configuración del Modelo — {modelo_seleccionado}")
+
+    subtab_comites, subtab_formulario = st.tabs(
+        ["🏛️ Parámetros de Comités", "📋 Campos del Formulario"]
     )
 
-    campos_actuales = obtener_esquema_formulario(id_modelo_actual)
-    df_campos = (
-        pd.DataFrame(campos_actuales)
-        if campos_actuales
-        else pd.DataFrame(
-            columns=[
-                "nombre_campo",
-                "tipo_dato",
-                "opciones_separadas_por_coma",
-                "es_requerido",
-            ]
+    # REPLICACIÓN EXACTA DE LA TABLA PARAMETROS_COMITES DEL GOOGLE SHEET
+    with subtab_comites:
+        st.markdown("### 🏛️ Estructura de Órganos y Comités")
+        st.write(
+            "Administra las secciones, integrantes por banca y reglas del"
+            " sorteo para este modelo."
         )
-    )
 
-    df_editado = st.data_editor(
-        df_campos,
-        num_rows="dynamic",
-        column_config={
-            "nombre_campo": st.column_config.TextColumn("Nombre del Campo"),
-            "tipo_dato": st.column_config.SelectboxColumn(
-                "Tipo de Entrada",
-                options=["texto", "numero", "seleccion", "booleano"],
-            ),
-            "opciones_separadas_por_coma": st.column_config.TextColumn(
-                "Opciones (solo si es Selección)"
-            ),
-            "es_requerido": st.column_config.CheckboxColumn(
-                "¿Obligatorio?", default=False
-            ),
-        },
-        key="editor_esquema_formulario",
-    )
-
-    if st.button("💾 Publicar Cambios en el Formulario"):
-        lista_nuevos_campos = df_editado.to_dict(orient="records")
-        if guardar_esquema_formulario(id_modelo_actual, lista_nuevos_campos):
-            st.success(
-                "¡Estructura de formulario actualizada correctamente!"
+        comites_actuales = obtener_parametros_comites(id_modelo_actual)
+        df_comites = (
+            pd.DataFrame(comites_actuales)
+            if comites_actuales
+            else pd.DataFrame(
+                columns=[
+                    "clave_seccion",
+                    "organo_comite",
+                    "integrantes_por_banca",
+                    "requiere_marca",
+                    "max_delegaciones_seccion",
+                ]
             )
-            st.rerun()
+        )
+
+        df_comites_editado = st.data_editor(
+            df_comites,
+            num_rows="dynamic",
+            column_config={
+                "clave_seccion": st.column_config.TextColumn(
+                    "Clave Sección (ej: c/consejo seg+ecosoc)"
+                ),
+                "organo_comite": st.column_config.TextColumn(
+                    "Órgano / Comité (ej: Embajador, AG1, ECOSOC)"
+                ),
+                "integrantes_por_banca": st.column_config.NumberColumn(
+                    "Integrantes por Banca", default=1, min_value=1
+                ),
+                "requiere_marca": st.column_config.SelectboxColumn(
+                    "Regla de Marca",
+                    options=["ALWAYS", "REQUIRES_MARCA", "SINGLE"],
+                    default="ALWAYS",
+                ),
+                "max_delegaciones_seccion": st.column_config.NumberColumn(
+                    "Máx Delegaciones Sección", default=1, min_value=1
+                ),
+            },
+            use_container_width=True,
+            key="editor_parametros_comites",
+        )
+
+        if st.button("💾 Guardar Parámetros de Comités"):
+            lista_comites_nuevos = df_comites_editado.to_dict(orient="records")
+            if guardar_parametros_comites(
+                id_modelo_actual, lista_comites_nuevos
+            ):
+                st.success(
+                    "¡Parámetros de comités actualizados en Firestore!"
+                )
+                st.rerun()
+
+    # DISEÑADOR DINÁMICO DE CAMPOS ADICIONALES DEL FORMULARIO
+    with subtab_formulario:
+        st.markdown("### 📋 Diseñador de Campos Adicionales")
+        st.write(
+            "Agrega o elimina campos personalizados para que los docentes/estudiantes"
+            " completen al inscribirse."
+        )
+
+        campos_actuales = obtener_esquema_formulario(id_modelo_actual)
+        df_campos = (
+            pd.DataFrame(campos_actuales)
+            if campos_actuales
+            else pd.DataFrame(
+                columns=[
+                    "nombre_campo",
+                    "tipo_dato",
+                    "opciones_separadas_por_coma",
+                    "es_requerido",
+                ]
+            )
+        )
+
+        df_fields_editado = st.data_editor(
+            df_campos,
+            num_rows="dynamic",
+            column_config={
+                "nombre_campo": st.column_config.TextColumn("Nombre del Campo"),
+                "tipo_dato": st.column_config.SelectboxColumn(
+                    "Tipo de Entrada",
+                    options=["texto", "numero", "seleccion", "booleano"],
+                ),
+                "opciones_separadas_por_coma": st.column_config.TextColumn(
+                    "Opciones (solo para Selección)"
+                ),
+                "es_requerido": st.column_config.CheckboxColumn(
+                    "¿Obligatorio?", default=False
+                ),
+            },
+            use_container_width=True,
+            key="editor_esquema_formulario",
+        )
+
+        if st.button("💾 Guardar Campos del Formulario"):
+            lista_nuevos_campos = df_fields_editado.to_dict(orient="records")
+            if guardar_esquema_formulario(
+                id_modelo_actual, lista_nuevos_campos
+            ):
+                st.success("¡Estructura de formulario guardada con éxito!")
+                st.rerun()
