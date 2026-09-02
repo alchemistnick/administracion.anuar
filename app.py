@@ -148,7 +148,6 @@ def ejecutar_sorteo_automatico(id_modelo):
         if not delegaciones:
             return False, "No hay instituciones registradas para sortear."
 
-        # Organizar comités por clave de sección (ej: "C/ CS + ECOSOC", "AG + ECOSOC")
         secciones_map = {}
         for c in comites_reglas:
             sec = str(c.get("clave_seccion", "GENERAL")).strip()
@@ -156,7 +155,6 @@ def ejecutar_sorteo_automatico(id_modelo):
                 secciones_map[sec] = []
             secciones_map[sec].append(str(c.get("organo_comite")).strip())
 
-        # Estructurar pozo de países
         paises_disponibles = []
         for p in catalogo_paises:
             if isinstance(p, dict):
@@ -712,7 +710,6 @@ with tab_config:
 
         comites_modelo = obtener_parametros_comites(id_modelo_actual)
 
-        # Extraer comités ÚNICOS eliminando duplicados por sección
         lista_nombres_comites = sorted(
             list({
                 str(c.get("organo_comite")).strip()
@@ -734,7 +731,6 @@ with tab_config:
                 height=120,
             )
 
-            # Deduplicar lista de países
             lista_paises_procesados = list(
                 dict.fromkeys(
                     [p.strip() for p in paises_raw.split("\n") if p.strip()]
