@@ -151,7 +151,7 @@ def ejecutar_sorteo_automatico(id_modelo):
         batch = db.batch()
         total_asignaciones_creadas = 0
 
-        # Pozos de países según los clics guardados por órgano
+        # Pozos de países según las opciones guardadas por órgano
         pozos_comites = {}
         for c in comites_reglas:
             organo = str(c.get("organo_comite")).strip()
@@ -647,16 +647,21 @@ with tab_config:
     with subtab_catalogo:
         st.markdown("### 🌍 Catálogo de Países y Asignación de Órganos")
         st.write(
-            "Pegue la lista de países y seleccione mediante clics en qué"
-            " comités/órganos participa cada uno."
+            "Pegue la lista de países y defina qué comités/órganos tiene"
+            " asignados cada uno."
         )
 
         comites_modelo = obtener_parametros_comites(id_modelo_actual)
-        lista_nombres_comites = [
-            str(c.get("organo_comite")).strip()
-            for c in comites_modelo
-            if c.get("organo_comite")
-        ]
+
+        # Extraer comités ÚNICOS eliminando duplicados por sección
+        lista_nombres_comites = sorted(
+            list({
+                str(c.get("organo_comite")).strip()
+                for c in comites_modelo
+                if c.get("organo_comite")
+                and str(c.get("organo_comite")).strip()
+            })
+        )
 
         if not lista_nombres_comites:
             st.warning(
@@ -667,10 +672,10 @@ with tab_config:
             paises_raw = st.text_area(
                 "Pegue la lista de países (un país por línea):",
                 placeholder="Argentina\nBrasil\nFrancia\nEstados Unidos",
-                height=150,
+                height=120,
             )
 
-            # Deduplicación limpia conservando orden
+            # Deduplicar lista de países conservando orden
             lista_paises_procesados = list(
                 dict.fromkeys(
                     [p.strip() for p in paises_raw.split("\n") if p.strip()]
@@ -679,33 +684,25 @@ with tab_config:
 
             if lista_paises_procesados:
                 st.markdown("---")
-                st.markdown("#### 🔘 Seleccione los Órganos para cada País")
-                st.caption(
-                    "Marque con un clic las casillas de los comités a los que"
-                    " pertenece cada país:"
-                )
+                st.markdown("#### 🔘 Asignación de Órganos por País")
 
                 mapa_pais_organos = {}
 
                 for p_idx, pais in enumerate(lista_paises_procesados):
-                    st.markdown(f"**📍 {pais}**")
-                    cols = st.columns(len(lista_nombres_comites))
-                    organos_seleccionados = []
+                    key_multi = f"multiselect_{id_modelo_actual}_{p_idx}_{pais}".replace(
+                        " ", "_"
+                    )
 
-                    for o_idx, organo in enumerate(lista_nombres_comites):
-                        with cols[o_idx]:
-                            key_checkbox = f"chk_{id_modelo_actual}_{p_idx}_{o_idx}_{pais}_{organo}".replace(
-                                " ", "_"
-                            )
-                            chk = st.checkbox(
-                                organo, key=key_checkbox, value=True
-                            )
-                            if chk:
-                                organos_seleccionados.append(organo)
+                    organos_seleccionados = st.multiselect(
+                        f"📍 **{pais}** — Órganos en los que participa:",
+                        options=lista_nombres_comites,
+                        default=lista_nombres_comites,
+                        key=key_multi,
+                    )
 
                     mapa_pais_organos[pais] = organos_seleccionados
-                    st.markdown("---")
 
+                st.markdown("---")
                 if st.button("💾 Guardar Catálogo y Presencia de Órganos"):
                     catalogo_estructurado = [
                         {"pais": p, "organos_permitidos": orgs}
