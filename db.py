@@ -3,7 +3,7 @@ from firebase_admin import credentials, firestore
 import pandas as pd
 import streamlit as st
 
-# Inicialización de Firebase
+# Inicialización Singleton de Firebase
 if not firebase_admin._apps:
     cred = credentials.Certificate(dict(st.secrets["firebase"]))
     firebase_admin.initialize_app(cred)
@@ -16,7 +16,7 @@ db = firestore.client()
 
 
 def obtener_modelos_activos():
-    """Obtiene la lista de modelos desde Firestore o genera una base de respaldo."""
+    """Obtiene la lista de modelos desde Firestore o genera una lista de respaldo."""
     try:
         docs = db.collection("modelos").stream()
         modelos = []
@@ -41,27 +41,51 @@ def obtener_modelos_activos():
         ]
 
 
+def obtener_parametros_comites(id_modelo):
+    """Obtiene la lista de comités u órganos configurados para el modelo."""
+    try:
+        doc = db.collection("configuracion").document(str(id_modelo)).get()
+        if doc.exists:
+            return doc.to_dict().get("parametros_comites", [])
+        return []
+    except Exception as e:
+        st.error(f"Error al leer parámetros de comités: {e}")
+        return []
+
+
+def guardar_parametros_comites(id_modelo, lista_comites):
+    """Guarda la estructura de comités (replicando la tabla PARAMETROS_COMITES)."""
+    try:
+        db.collection("configuracion").document(str(id_modelo)).set(
+            {"parametros_comites": lista_comites}, merge=True
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar parámetros de comités: {e}")
+        return False
+
+
 def obtener_esquema_formulario(id_modelo):
-    """Recupera la lista de campos personalizados configurados para el modelo."""
+    """Recupera los campos personalizados para los formularios de inscripción."""
     try:
         doc = db.collection("configuracion").document(str(id_modelo)).get()
         if doc.exists:
             return doc.to_dict().get("campos_personalizados", [])
         return []
     except Exception as e:
-        st.error(f"Error al obtener esquema del formulario: {e}")
+        st.error(f"Error al obtener esquema de formulario: {e}")
         return []
 
 
 def guardar_esquema_formulario(id_modelo, lista_campos):
-    """Guarda la estructura de campos personalizados del formulario."""
+    """Guarda la lista de campos personalizados del formulario."""
     try:
         db.collection("configuracion").document(str(id_modelo)).set(
             {"campos_personalizados": lista_campos}, merge=True
         )
         return True
     except Exception as e:
-        st.error(f"Error al guardar esquema del formulario: {e}")
+        st.error(f"Error al guardar esquema de formulario: {e}")
         return False
 
 
@@ -92,7 +116,7 @@ def obtener_delegaciones_por_modelo(id_modelo=None):
 
 
 def actualizar_estado_delegacion(id_delegacion, estado, motivo=""):
-    """Actualiza el estado de aprobación/rechazo de un legajo."""
+    """Actualiza el estado de aprobación/rechazo del legajo de una institución."""
     try:
         payload = {"estado": estado}
         if motivo:
@@ -112,7 +136,7 @@ def actualizar_estado_delegacion(id_delegacion, estado, motivo=""):
 
 
 def obtener_integrantes_delegacion(id_delegacion):
-    """Recupera los integrantes de una delegación específica."""
+    """Recupera los participantes pertenecientes a una delegación."""
     try:
         docs = (
             db.collection("delegaciones")
@@ -132,7 +156,7 @@ def obtener_integrantes_delegacion(id_delegacion):
 
 
 def obtener_nominas_por_modelo(id_modelo=None):
-    """Obtiene la nómina consolidada de participantes para el modelo seleccionado."""
+    """Consolida la nómina de todos los participantes del modelo seleccionado."""
     delegaciones = obtener_delegaciones_por_modelo(id_modelo)
     todas_nominas = []
     for d in delegaciones:
@@ -151,7 +175,7 @@ def obtener_nominas_por_modelo(id_modelo=None):
 
 
 def obtener_todos_pagos(id_modelo=None):
-    """Obtiene el historial de pagos filtrado por modelo."""
+    """Obtiene el historial de comprobantes de pago."""
     try:
         ref = db.collection("pagos")
         if id_modelo:
@@ -181,24 +205,24 @@ def obtener_pagos_pendientes(id_modelo=None):
 
 
 def actualizar_estado_pago(id_pago, nuevo_estado):
-    """Actualiza el estado de aprobación o rechazo de un pago."""
+    """Actualiza el estado de aprobación o rechazo de un comprobante de pago."""
     try:
         db.collection("pagos").document(str(id_pago)).set(
             {"estado_pago": nuevo_estado}, merge=True
         )
         return True
     except Exception as e:
-        st.error(f"Error al actualizar estado de pago: {e}")
+        st.error(f"Error al actualizar estado del pago: {e}")
         return False
 
 
 # ==========================================
-# 5. AUDITORÍA DE ACREDITACIÓN
+# 5. AUDITORÍA DE ACREDITACIÓN EN VIVO
 # ==========================================
 
 
 def procesar_acreditacion_forms(df_forms, id_modelo):
-    """Cruza los DNI de Google Forms contra la nómina en Firestore."""
+    """Cruza los DNI cargados vía Google Forms contra la nómina en Firestore."""
     nominas_oficiales = obtener_nominas_por_modelo(id_modelo)
     dnis_oficiales = {
         str(n.get("dni")).strip(): n for n in nominas_oficiales if n.get("dni")
