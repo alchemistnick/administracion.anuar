@@ -148,60 +148,119 @@ def ejecutar_sorteo_automatico(id_modelo):
         if not delegaciones:
             return False, "No hay instituciones registradas para sortear."
 
+        # Organizar comités por clave de sección (ej: "C/ CS + ECOSOC", "AG + ECOSOC")
+        secciones_map = {}
+        for c in comites_reglas:
+            sec = str(c.get("clave_seccion", "GENERAL")).strip()
+            if sec not in secciones_map:
+                secciones_map[sec] = []
+            secciones_map[sec].append(str(c.get("organo_comite")).strip())
+
+        # Estructurar pozo de países
+        paises_disponibles = []
+        for p in catalogo_paises:
+            if isinstance(p, dict):
+                paises_disponibles.append(p)
+            elif isinstance(p, str):
+                paises_disponibles.append(
+                    {
+                        "pais": p,
+                        "organos_permitidos": [
+                            str(c.get("organo_comite")).strip()
+                            for c in comites_reglas
+                        ],
+                    }
+                )
+
+        random.shuffle(paises_disponibles)
+
         batch = db.batch()
         total_asignaciones_creadas = 0
-
-        # Pozos de países según las opciones guardadas por órgano
-        pozos_comites = {}
-        for c in comites_reglas:
-            organo = str(c.get("organo_comite")).strip()
-            paises_aptos = []
-            for item in catalogo_paises:
-                if isinstance(item, dict):
-                    if organo in item.get("organos_permitidos", []):
-                        paises_aptos.append(item.get("pais"))
-                elif isinstance(item, str):
-                    paises_aptos.append(item)
-
-            random.shuffle(paises_aptos)
-            pozos_comites[organo] = paises_aptos
+        paises_asignados_global = set()
 
         for del_doc in delegaciones:
             email_docente = del_doc.get("id_delegacion")
 
-            for c in comites_reglas:
-                organo = str(c.get("organo_comite")).strip()
-                pozo = pozos_comites.get(organo, [])
+            desglose_raw = del_doc.get("desglose_modalidades", "{}")
+            try:
+                import ast
 
-                if pozo:
-                    pais_asignado = pozo.pop(0)
-                    asig_id = (
-                        f"{email_docente}_{organo}".replace(" ", "_")
-                        .replace("/", "_")
-                        .lower()
-                    )
-                    doc_ref = (
-                        db.collection("delegaciones")
-                        .document(email_docente)
-                        .collection("asignaciones")
-                        .document(asig_id)
-                    )
+                desglose_dict = (
+                    ast.literal_eval(desglose_raw)
+                    if isinstance(desglose_raw, str)
+                    else desglose_raw
+                )
+            except Exception:
+                desglose_dict = {}
 
-                    payload = {
-                        "id_modelo": id_modelo,
-                        "organo_comite": organo,
-                        "organo": organo,
-                        "pais": pais_asignado,
-                        "fecha_sorteo": firestore.SERVER_TIMESTAMP,
-                    }
+            if not desglose_dict:
+                desglose_dict = {"GENERAL": 1}
 
-                    batch.set(doc_ref, payload, merge=True)
-                    total_asignaciones_creadas += 1
+            del_index = 0
+            for sec_nombre, cantidad_del in desglose_dict.items():
+                comites_de_seccion = secciones_map.get(
+                    sec_nombre,
+                    [
+                        str(c.get("organo_comite")).strip()
+                        for c in comites_reglas
+                    ],
+                )
+
+                for i in range(int(cantidad_del)):
+                    del_index += 1
+
+                    pais_elegido = None
+                    for candidate in paises_disponibles:
+                        nombre_p = candidate.get("pais")
+                        permitidos = candidate.get("organos_permitidos", [])
+
+                        if nombre_p not in paises_asignados_global:
+                            if all(com in permitidos for com in comites_de_seccion):
+                                pais_elegido = nombre_p
+                                paises_asignados_global.add(nombre_p)
+                                break
+
+                    if not pais_elegido:
+                        for candidate in paises_disponibles:
+                            nombre_p = candidate.get("pais")
+                            if nombre_p not in paises_asignados_global:
+                                pais_elegido = nombre_p
+                                paises_asignados_global.add(nombre_p)
+                                break
+
+                    if pais_elegido:
+                        for organo in comites_de_seccion:
+                            asig_id = (
+                                f"{email_docente}_{sec_nombre}_{del_index}_{organo}".replace(
+                                    " ", "_"
+                                )
+                                .replace("/", "_")
+                                .lower()
+                            )
+                            doc_ref = (
+                                db.collection("delegaciones")
+                                .document(email_docente)
+                                .collection("asignaciones")
+                                .document(asig_id)
+                            )
+
+                            payload = {
+                                "id_modelo": id_modelo,
+                                "seccion": sec_nombre,
+                                "delegacion_nro": del_index,
+                                "organo_comite": organo,
+                                "organo": organo,
+                                "pais": pais_elegido,
+                                "fecha_sorteo": firestore.SERVER_TIMESTAMP,
+                            }
+
+                            batch.set(doc_ref, payload, merge=True)
+                            total_asignaciones_creadas += 1
 
         batch.commit()
         return (
             True,
-            f"🎉 Sorteo finalizado con éxito. Se generaron {total_asignaciones_creadas} asignaciones de bancas/países.",
+            f"🎉 Sorteo por Delegación Completa finalizado con éxito. Se asignaron {len(paises_asignados_global)} países unificados ({total_asignaciones_creadas} bancas en total).",
         )
 
     except Exception as e:
@@ -675,7 +734,7 @@ with tab_config:
                 height=120,
             )
 
-            # Deduplicar lista de países conservando orden
+            # Deduplicar lista de países
             lista_paises_procesados = list(
                 dict.fromkeys(
                     [p.strip() for p in paises_raw.split("\n") if p.strip()]
