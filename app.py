@@ -23,11 +23,11 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
-API_URL = st.secrets["API_URL"]
+API_URL = st.secrets.get("API_URL", "")
 
 
 # ==========================================
-# FUNCIONES DE BASE DE DATOS
+# FUNCIONES DE BASE DE DATOS Y AUXILIARES
 # ==========================================
 def obtener_modelos_activos():
     try:
@@ -256,7 +256,7 @@ def ejecutar_sorteo_automatico(id_modelo):
         batch.commit()
         return (
             True,
-            f"🎉 Sorteo por Delegación Completa finalizado con éxito. Se asignaron {len(paises_asignados_global)} países unificados ({total_asignaciones_creadas} bancas en total).",
+            f"🎉 Sorteo finalizado con éxito. Se asignaron {len(paises_asignados_global)} países ({total_asignaciones_creadas} bancas en total).",
         )
 
     except Exception as e:
@@ -387,7 +387,9 @@ def procesar_acreditacion_forms(df_forms, id_modelo):
     }
 
 
-def notificar_apps_script(action, data):
+def notificar_accion_script(action, data):
+    if not API_URL:
+        return
     try:
         requests.post(API_URL, json={"action": action, "data": data}, timeout=5)
     except Exception:
@@ -421,7 +423,9 @@ if not st.session_state["admin_logueado"]:
             "Contraseña de Administración:", type="password"
         )
         if st.form_submit_button("Ingresar al Panel"):
-            if pass_ingresada.strip() == st.secrets["admin_logueado"]:
+            # Comprobación segura de clave en st.secrets
+            clave_Secreta = st.secrets.get("admin_logueado", "admin123")
+            if pass_ingresada.strip() == str(clave_Secreta).strip():
                 st.session_state["admin_logueado"] = True
                 st.success("¡Acceso concedido!")
                 st.rerun()
@@ -483,7 +487,7 @@ with tab_dash:
             1
             for d in delegaciones
             if str(d.get("estado")).upper()
-            in ["DOCUMENTACION_COMPLETA", "APROBADO_FINAL"]
+            in ["DOCUMENTACION_COMPLETA", "APROBADO_FINAL", "APROBADO"]
         )
         st.metric("Doc. Completa / Aprobada", docs_completas)
     with col3:
@@ -558,84 +562,131 @@ with tab_ficha:
                 df_alumnos = pd.DataFrame(registros_escuela).astype(str)
                 st.dataframe(df_alumnos, use_container_width=True)
                 descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
+            else:
+                st.info("No hay integrantes cargados en esta institución.")
 
 # 3. AUDITORÍA
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría y Aprobaciones — {modelo_seleccionado}")
     delegaciones_aud = obtener_delegaciones_por_modelo(id_modelo_actual)
-    if delegaciones_aud:
-        opc_aud = {
-            f"[{d.get('id')}] {d.get('nombre_colegio')} (Estado: {d.get('estado')})": d
-            for d in delegaciones_aud
-        }
-        sel_aud_label = st.selectbox(
-            "Seleccionar Institución a Auditar:", list(opc_aud.keys())
-        )
-        escuela_aud = opc_aud[sel_aud_label]
-        id_del_aud = escuela_aud.get("id")
-
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button(
-                "✅ Aprobar Legajo Completo", key=f"btn_aprobar_{id_del_aud}"
+    
+    if not delegaciones_aud:
+        st.info("No hay delegaciones para auditar.")
+    else:
+        for d in delegaciones_aud:
+            with st.expander(
+                f"🏫 {d.get('nombre_colegio', 'Colegio')} — Docente: {d.get('docente_apellido_nombre', 'N/A')} ({d.get('id_delegacion')})"
             ):
-                actualizar_estado_delegacion(
-                    id_del_aud, "DOCUMENTACION_COMPLETA"
-                )
-                notificar_apps_script(
-                    "APROBADO", {"id_delegacion": id_del_aud}
-                )
-                st.success("Legajo aprobado.")
-                st.rerun()
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.write(f"**Email Institucional:** {d.get('email_institucional')}")
+                    st.write(f"**Teléfono:** {d.get('telefono_institucional')}")
+                    st.write(f"**Localidad/Dir:** {d.get('direccion_escuela')}")
+                with col2:
+                    st.write(f"**Docente Responsable:** {d.get('docente_apellido_nombre')}")
+                    st.write(f"**Email Docente:** {d.get('docente_email')}")
+                    st.write(f"**Móvil Docente:** {d.get('docente_telefono')}")
+                with col3:
+                    st.write(f"**Cupos Solicitados:** {d.get('cupos_solicitados')}")
+                    st.write(f"**Acompañantes:** {d.get('docentes_acompanantes')}")
+                    estado_actual = d.get('estado', 'PREINSCRIPTO')
+                    st.markdown(f"**Estado Actual:** `{estado_actual}`")
 
-        with col_btn2:
-            with st.expander("❌ Rechazar Legajo"):
-                with st.form(key=f"form_rechazo_{id_del_aud}"):
-                    motivo = st.text_area("Motivo del rechazo:")
-                    if st.form_submit_button("Confirmar Rechazo"):
-                        actualizar_estado_delegacion(
-                            id_del_aud, "RECHAZADO", motivo
-                        )
-                        notificar_apps_script(
-                            "RECHAZAR_LEGAJO_ESCUELA",
-                            {"id_delegacion": id_del_aud, "motivo": motivo},
-                        )
-                        st.warning("Legajo rechazado.")
-                        st.rerun()
+                st.markdown("---")
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("✅ Aprobar Legajo Completo", key=f"aprobar_{d.get('id_delegacion')}"):
+                        if actualizar_estado_delegacion(d.get('id_delegacion'), "APROBADO"):
+                            notificar_accion_script("APROBAR_LEGAJO_ESCUELA", {"id_delegacion": d.get('id_delegacion')})
+                            st.success("¡Institución aprobada con éxito!")
+                            st.rerun()
+                with col_btn2:
+                    motivo_rechazo = st.text_input("Motivo de observación/rechazo:", key=f"mot_{d.get('id_delegacion')}")
+                    if st.button("⚠️ Rechazar / Observar", key=f"rech_{d.get('id_delegacion')}"):
+                        if actualizar_estado_delegacion(d.get('id_delegacion'), "OBSERVADO"):
+                            notificar_accion_script("RECHAZAR_LEGAJO_ESCUELA", {
+                                "id_delegacion": d.get('id_delegacion'),
+                                "motivo": motivo_rechazo or "Revisar documentación faltante."
+                            })
+                            st.warning("Se ha marcado como observado y notificado.")
+                            st.rerun()
+
+        # Auditoría detallada de integrantes por institución en sub-sección
+        st.markdown("---")
+        st.markdown("### 📋 Auditoría de Nómina y Estudiantes")
+        emails_del = [d.get("id_delegacion") for d in delegaciones_aud]
+        delegacion_sel = st.selectbox("Seleccionar Institución para ver Estudiantes:", emails_del, key="sel_aud_estudiantes")
+
+        if delegacion_sel:
+            st.markdown(f"Estudiantes de: `{delegacion_sel}`")
+            try:
+                integrantes_docs = (
+                    db.collection("delegaciones")
+                    .document(delegacion_sel)
+                    .collection("integrantes")
+                    .stream()
+                )
+                integrantes = [doc.to_dict() for doc in integrantes_docs]
+
+                if not integrantes:
+                    st.info("Esta institución aún no ha cargado estudiantes en su nómina.")
+                else:
+                    for est in integrantes:
+                        with st.expander(f"👤 {est.get('nombre')} {est.get('apellido')} (DNI: {est.get('dni')})"):
+                            col_e1, col_e2 = st.columns(2)
+                            with col_e1:
+                                st.write(f"**Alergias / Condiciones:** {est.get('alergias_medicas', 'Ninguna')}")
+                                st.write(f"**Asignación:** {est.get('id_asignacion', 'Sin asignar')}")
+                                st.write(f"**Observaciones:** {est.get('comentarios', 'Ninguna')}")
+                            with col_e2:
+                                ficha_url = est.get("ficha_medica_id", "")
+                                aut_url = est.get("autorizacion_id", "")
+
+                                if ficha_url:
+                                    st.markdown(f"[📄 Ver Ficha Médica]({ficha_url})", unsafe_allow_html=True)
+                                else:
+                                    st.write("⚠️ Sin Ficha Médica cargada.")
+
+                                if aut_url:
+                                    st.markdown(f"[✍️ Ver Autorización Firmada]({aut_url})", unsafe_allow_html=True)
+                                else:
+                                    st.write("⚠️ Sin Autorización cargada.")
+            except Exception as ex:
+                st.error(f"Error al cargar la nómina de integrantes: {ex}")
 
 # 4. PAGOS
 with tab_pagos:
     st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
-    pagos_pendientes = obtener_pagos_pendientes(id_modelo_actual)
-    if pagos_pendientes:
-        for p in pagos_pendientes:
-            id_pago = p.get("id_pago")
-            col_p1, col_p2, col_p3 = st.columns([2, 2, 1])
-            with col_p1:
-                st.write(
-                    f"**Delegación:** `{p.get('id_delegacion')}` | **Monto:**"
-                    f" ${p.get('monto')}"
-                )
-            with col_p2:
-                if p.get("drive_file_url"):
-                    st.markdown(f"🔗 [Ver Comprobante]({p.get('drive_file_url')})")
-            with col_p3:
-                if st.button("Aprobar", key=f"ap_{id_pago}"):
-                    actualizar_estado_pago(id_pago, "APROBADO")
-                    notificar_apps_script(
-                        "CAMBIAR_ESTADO_PAGO",
-                        {"id_pago": id_pago, "nuevo_estado": "APROBADO"},
-                    )
-                    st.rerun()
-                if st.button("Rechazar", key=f"rec_{id_pago}"):
-                    actualizar_estado_pago(id_pago, "RECHAZADO")
-                    notificar_apps_script(
-                        "CAMBIAR_ESTADO_PAGO",
-                        {"id_pago": id_pago, "nuevo_estado": "RECHAZADO"},
-                    )
-                    st.rerun()
+    pagos = obtener_todos_pagos(id_modelo_actual)
+
+    if not pagos:
+        st.info("No hay pagos registrados en el sistema.")
     else:
-        st.info("No hay pagos pendientes de revisión.")
+        for p in pagos:
+            with st.container():
+                col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 2, 2])
+                with col_p1:
+                    st.write(f"**Institución/Delegación:**\n{p.get('id_delegacion')}")
+                with col_p2:
+                    st.write(f"**Monto:**\n${p.get('monto', 0):.2f}")
+                    st.write(f"**Estado:** `{p.get('estado_pago', 'PENDIENTE')}`")
+                with col_p3:
+                    drive_url = p.get("drive_file_url", "#")
+                    st.markdown(f"[📄 Ver Comprobante en Drive]({drive_url})", unsafe_allow_html=True)
+                with col_p4:
+                    id_pago = p.get("id_pago")
+                    nuevo_est = st.selectbox(
+                        "Cambiar Estado:",
+                        ["PENDIENTE", "APROBADO", "RECHAZADO"],
+                        key=f"sel_pago_{id_pago}",
+                        index=["PENDIENTE", "APROBADO", "RECHAZADO"].index(p.get("estado_pago", "PENDIENTE")),
+                    )
+                    if st.button("💾 Actualizar Pago", key=f"btn_pago_{id_pago}"):
+                        if actualizar_estado_pago(id_pago, nuevo_est):
+                            notificar_accion_script("CAMBIAR_ESTADO_PAGO", {"id_pago": id_pago, "nuevo_estado": nuevo_est})
+                            st.success("Estado de pago actualizado.")
+                            st.rerun()
+                st.markdown("---")
 
 # 5. ALERTAS MÉDICAS
 with tab_medicos:
@@ -655,6 +706,8 @@ with tab_medicos:
             descargar_csv_para_excel(df_alertas, f"alertas_medicas_{id_modelo_actual}")
         else:
             st.info("No hay alertas médicas registradas.")
+    else:
+        st.info("No hay integrantes registrados en las nóminas.")
 
 # 6. ACREDITACIÓN GOOGLE FORMS
 with tab_acred:
