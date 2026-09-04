@@ -654,7 +654,7 @@ with tab_auditoria:
             except Exception as ex:
                 st.error(f"Error al cargar la nómina de integrantes: {ex}")
 
-# 4. PAGOS
+# 4. PAGOS (Afinado)
 with tab_pagos:
     st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
     pagos = obtener_todos_pagos(id_modelo_actual)
@@ -666,13 +666,20 @@ with tab_pagos:
             with st.container():
                 col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 2, 2])
                 with col_p1:
-                    st.write(f"**Institución/Delegación:**\n{p.get('id_delegacion')}")
+                    st.write(f"**Delegación:**\n`{p.get('id_delegacion')}`")
                 with col_p2:
                     st.write(f"**Monto:**\n${p.get('monto', 0):.2f}")
                     st.write(f"**Estado:** `{p.get('estado_pago', 'PENDIENTE')}`")
                 with col_p3:
-                    drive_url = p.get("drive_file_url", "#")
-                    st.markdown(f"[📄 Ver Comprobante en Drive]({drive_url})", unsafe_allow_html=True)
+                    drive_url = p.get("drive_file_url", "")
+                    if drive_url and "drive.google.com" in drive_url:
+                        # Verificamos si apunta a un archivo individual o a una carpeta general
+                        if "folders/" in drive_url:
+                            st.warning("⚠️ Enlace genérico a carpeta")
+                        else:
+                            st.markdown(f"📄 [Abrir Comprobante PDF/Imagen]({drive_url})", unsafe_allow_html=True)
+                    else:
+                        st.error("❌ Sin enlace válido")
                 with col_p4:
                     id_pago = p.get("id_pago")
                     nuevo_est = st.selectbox(
@@ -681,10 +688,10 @@ with tab_pagos:
                         key=f"sel_pago_{id_pago}",
                         index=["PENDIENTE", "APROBADO", "RECHAZADO"].index(p.get("estado_pago", "PENDIENTE")),
                     )
-                    if st.button("💾 Actualizar Pago", key=f"btn_pago_{id_pago}"):
+                    if st.button("💾 Actualizar", key=f"btn_pago_{id_pago}"):
                         if actualizar_estado_pago(id_pago, nuevo_est):
                             notificar_accion_script("CAMBIAR_ESTADO_PAGO", {"id_pago": id_pago, "nuevo_estado": nuevo_est})
-                            st.success("Estado de pago actualizado.")
+                            st.success("Actualizado.")
                             st.rerun()
                 st.markdown("---")
 
