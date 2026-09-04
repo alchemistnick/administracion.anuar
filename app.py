@@ -654,39 +654,51 @@ with tab_auditoria:
             except Exception as ex:
                 st.error(f"Error al cargar la nómina de integrantes: {ex}")
 
-# 4. PAGOS (Afinado)
+# 4. PAGOS (Actualizado con Nombre de Escuela)
 with tab_pagos:
     st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
     pagos = obtener_todos_pagos(id_modelo_actual)
 
     if not pagos:
-        st.info("No hay pagos registrados en el sistema.")
+        st.info("No hay pagos registrados en el sistema para este modelo.")
     else:
+        # Diccionario auxiliar para buscar el nombre del colegio por su email/id_delegacion
+        delegaciones_lista = obtener_delegaciones_por_modelo(id_modelo_actual)
+        mapa_colegios = {d.get("id_delegacion"): d.get("nombre_colegio", "Colegio sin nombre") for d in delegaciones_lista}
+
         for p in pagos:
             with st.container():
+                id_del = p.get('id_delegacion')
+                nombre_escuela = mapa_colegios.get(id_del, "Institución no encontrada")
+
                 col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 2, 2])
                 with col_p1:
-                    st.write(f"**Delegación:**\n`{p.get('id_delegacion')}`")
+                    st.markdown(f"**🏫 {nombre_escuela}**")
+                    st.caption(f"📧 `{id_del}`")
                 with col_p2:
-                    st.write(f"**Monto:**\n${p.get('monto', 0):.2f}")
+                    monto_val = p.get('monto') or p.get('monto_abonado') or 0.0
+                    st.write(f"**Monto:**\n${float(monto_val):.2f}")
                     st.write(f"**Estado:** `{p.get('estado_pago', 'PENDIENTE')}`")
                 with col_p3:
-                    drive_url = p.get("drive_file_url", "")
-                    if drive_url and "drive.google.com" in drive_url:
-                        # Verificamos si apunta a un archivo individual o a una carpeta general
+                    drive_url = p.get("drive_file_url") or p.get("drive_url") or ""
+                    if drive_url:
                         if "folders/" in drive_url:
-                            st.warning("⚠️ Enlace genérico a carpeta")
+                            st.warning("⚠️ Es una carpeta general (revisar subida)")
+                            st.markdown(f"[📁 Abrir Carpeta]({drive_url})", unsafe_allow_html=True)
                         else:
-                            st.markdown(f"📄 [Abrir Comprobante PDF/Imagen]({drive_url})", unsafe_allow_html=True)
+                            st.markdown(f"📄 [Abrir Comprobante]({drive_url})", unsafe_allow_html=True)
                     else:
-                        st.error("❌ Sin enlace válido")
+                        st.error("❌ Sin enlace adjunto")
                 with col_p4:
                     id_pago = p.get("id_pago")
+                    estado_actual = p.get("estado_pago", "PENDIENTE")
+                    idx_estado = ["PENDIENTE", "APROBADO", "RECHAZADO"].index(estado_actual) if estado_actual in ["PENDIENTE", "APROBADO", "RECHAZADO"] else 0
+                    
                     nuevo_est = st.selectbox(
                         "Cambiar Estado:",
                         ["PENDIENTE", "APROBADO", "RECHAZADO"],
                         key=f"sel_pago_{id_pago}",
-                        index=["PENDIENTE", "APROBADO", "RECHAZADO"].index(p.get("estado_pago", "PENDIENTE")),
+                        index=idx_estado,
                     )
                     if st.button("💾 Actualizar", key=f"btn_pago_{id_pago}"):
                         if actualizar_estado_pago(id_pago, nuevo_est):
