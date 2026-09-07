@@ -521,33 +521,43 @@ with tab_ficha:
             escuela = opciones_escuelas[escuela_label]
             id_del = escuela.get("id")
 
+            st.markdown("### 📋 Datos Institucionales y de Contacto")
             cols_info = st.columns(3)
             with cols_info[0]:
-                st.markdown(
-                    f"**🏛️ Institución:** {escuela.get('nombre_colegio', '-')}"
-                )
-                st.markdown(
-                    f"**📍 Dirección:** {escuela.get('direccion_escuela', '-')}"
-                )
-                st.markdown(f"**📧 Email / ID:** `{id_del}`")
+                st.markdown(f"**🏛️ Institución:** {escuela.get('nombre_colegio', '-')}")
+                st.markdown(f"**📍 Dirección:** {escuela.get('direccion_escuela', '-')}")
+                st.markdown(f"**📧 Email Institucional:** {escuela.get('email_institucional', '-')}")
+                st.markdown(f"**📞 Teléfono Institucional:** {escuela.get('telefono_institucional', '-')}")
             with cols_info[1]:
-                st.markdown(
-                    "**👤 Responsable:**"
-                    f" {escuela.get('docente_apellido_nombre', '-')}"
-                )
-                st.markdown(
-                    f"**📱 Teléfono:** {escuela.get('docente_telefono', '-')}"
-                )
+                st.markdown(f"**👤 Responsable / Docente:** {escuela.get('docente_apellido_nombre', '-')}")
+                st.markdown(f"**📧 Email Docente (Usuario):** `{escuela.get('docente_email', '-')}`")
+                st.markdown(f"**📱 Teléfono Móvil:** {escuela.get('docente_telefono', '-')}")
+                st.markdown(f"**🔑 Clave Hash:** `{escuela.get('secret_hash', '-')}`")
             with cols_info[2]:
-                st.markdown(
-                    "**📊 Cupos Solicitados:**"
-                    f" {escuela.get('cupos_solicitados', '-')}"
-                )
-                st.markdown(
-                    f"**🔑 Clave Hash:** `{escuela.get('secret_hash', '-')}`"
-                )
+                st.markdown(f"**📊 Cupos Solicitados:** {escuela.get('cupos_solicitados', '-')}")
+                st.markdown(f"**👨‍🏫 Docentes Acompañantes:** {escuela.get('docentes_acompanantes', '-')}")
+                st.markdown(f"**📌 Estado del Legajo:** `{escuela.get('estado', 'PREINSCRIPTO')}`")
+                st.markdown(f"**📅 Fecha Registro:** {escuela.get('fecha_registro', '-')}")
+
+            # Desglose detallado de comités y tipos de delegaciones solicitadas
+            st.markdown("---")
+            st.markdown("### 🇺🇳 Detalle de Comités y Secciones Solicitadas")
+            desglose_raw = escuela.get('desglose_modalidades', "{}")
+            
+            try:
+                import ast
+                desglose_dict = ast.literal_eval(desglose_raw) if isinstance(desglose_raw, str) else desglose_raw
+            except Exception:
+                desglose_dict = {}
+
+            if desglose_dict and isinstance(desglose_dict, dict):
+                for seccion, cantidad in desglose_dict.items():
+                    st.markdown(f"- **Sección / Tipo de Comité:** `{seccion}` ➔ **Cantidad de Delegaciones:** **{cantidad}**")
+            else:
+                st.info("No hay un desglose de comités registrado para esta institución.")
 
             st.markdown("---")
+            st.markdown("### 👥 Nómina de Estudiantes y Documentación Adjunta")
             registros_escuela = obtener_integrantes_delegacion(id_del)
             if registros_escuela:
                 df_alumnos = pd.DataFrame(registros_escuela).astype(str)
@@ -555,6 +565,10 @@ with tab_ficha:
                 descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
             else:
                 st.info("No hay integrantes cargados en esta institución.")
+        else:
+            st.warning("No se encontraron instituciones con ese criterio de búsqueda.")
+    else:
+        st.info("No hay delegaciones registradas para este modelo.")
 
 # 3. AUDITORÍA
 with tab_auditoria:
