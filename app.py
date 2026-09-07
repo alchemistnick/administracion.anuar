@@ -280,6 +280,19 @@ def obtener_todos_pagos(id_modelo=None):
         return []
 
 
+def obtener_pagos_por_delegacion(id_delegacion):
+    try:
+        docs = db.collection("pagos").where("id_delegacion", "==", str(id_delegacion)).stream()
+        pagos = []
+        for doc in docs:
+            p = doc.to_dict()
+            p["id_pago"] = doc.id
+            pagos.append(p)
+        return pagos
+    except Exception as e:
+        return []
+
+
 def actualizar_estado_pago(id_pago, nuevo_estado):
     try:
         db.collection("pagos").document(str(id_pago)).set({"estado_pago": nuevo_estado}, merge=True)
@@ -388,11 +401,18 @@ st.sidebar.markdown("---")
 ])
 
 with tab_dash:
-    st.subheader(f"📊 Panel General — {modelo_seleccionado}")
+    st.subheader(f"📊 Panel General y Recaudación — {modelo_seleccionado}")
     delegaciones = obtener_delegaciones_por_modelo(id_modelo_actual)
     nominas = obtener_nominas_por_modelo(id_modelo_actual)
     pagos = obtener_todos_pagos(id_modelo_actual)
+    
+    # Métricas y cálculos financieros globales
+    total_recaudacion_esperada = sum(float(d.get("costo_asignado", 0.0)) for d in delegaciones)
+    pagos_aprobados_lista = [p for p in pagos if str(p.get("estado_pago", "")).upper() == "APROBADO"]
+    total_recaudacion_cobrada = sum(float(p.get("monto") or p.get("monto_abonado") or 0.0) for p in pagos_aprobados_lista)
+    
     pagos_pendientes = [p for p in pagos if str(p.get("estado_pago", "")).upper() == "PENDIENTE"]
+    total_pendiente_verificacion = sum(float(p.get("monto") or p.get("monto_abonado") or 0.0) for p in pagos_pendientes)
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -406,6 +426,17 @@ with tab_dash:
         st.metric("Pagos Pendientes", len(pagos_pendientes))
 
     st.markdown("---")
+    st.markdown("### 💵 Resumen Financiero de la Edición")
+    col_fin1, col_fin2, col_fin3 = st.columns(3)
+    with col_fin1:
+        st.metric("💰 Recaudación Total Esperada", f"${total_recaudacion_esperada:,.2f}")
+    with col_fin2:
+        st.metric("✅ Recaudación Efectiva Cobrada", f"${total_recaudacion_cobrada:,.2f}")
+    with col_fin3:
+        st.metric("⏳ Monto Pendiente / En Revisión", f"${total_pendiente_verificacion:,.2f}")
+
+    st.markdown("---")
+    st.markdown("### 📋 Listado General de Instituciones")
     if delegaciones:
         df_del = pd.DataFrame(delegaciones).astype(str)
         st.dataframe(df_del, use_container_width=True)
@@ -415,7 +446,7 @@ with tab_dash:
 
 
 # =========================================================================
-# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL
+# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON HISTORIAL DE ACCIONES
 # =========================================================================
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría y Ficha Nominal — {modelo_seleccionado}")
@@ -439,6 +470,30 @@ with tab_auditoria:
             escuela = opciones_escuelas[escuela_label]
             id_del = escuela.get("id")
 
+            # -------------------------------------------------------------
+            # SECCIÓN: HISTORIAL DE ACCIONES Y ESTADO DEL TRÁMITE
+            # -------------------------------------------------------------
+            st.markdown("### 📋 Historial de Acciones y Estado del Trámite")
+            
+            costo_asignado = float(escuela.get("costo_asignado", 0.0))
+            pagos_escuela = obtener_pagos_por_delegacion(id_del)
+            tiene_pago_cargado = len(pagos_escuela) > 0
+            pago_aprobado = any(str(p.get("estado_pago", "")).upper() == "APROBADO" for p in pagos_escuela)
+            pago_pendiente = any(str(p.get("estado_pago", "")).upper() == "PENDIENTE" for p in pagos_escuela)
+            estado_legajo = str(escuela.get("estado", "PREINSCRIPTO")).upper()
+
+            with st.container():
+                st.markdown(
+                    f"""
+                    * **1. Registro inicial:** {'✅ Completado' if escuela else '⏳ Pendiente'}
+                    * **2. Envío del costo / presupuesto:** {'✅ Enviado ($ ' + f"{costo_asignado:,.2f}" + ')' if costo_asignado > 0 else '⏳ Pendiente de envío'}
+                    * **3. Carga de comprobante de pago:** {'✅ Comprobante subido por la institución' if tiene_pago_cargado else '⏳ A la espera de comprobante'}
+                    * **4. Verificación del pago:** {'✅ Pago aprobado' if pago_aprobado else ('⚠️ Pago a la espera de confirmación' if pago_pendiente else '⏳ Sin verificar')}
+                    * **5. Estado final del legajo:** {'🎉 **Aprobado**' if estado_legajo in ['APROBADO', 'APROBADO_FINAL', 'DOCUMENTACION_COMPLETA'] else ('⚠️ **Observado / Rechazado**' if estado_legajo == 'OBSERVADO' else '⏳ **En proceso de revisión**')}
+                    """
+                )
+            st.markdown("---")
+
             st.markdown("### 📋 Datos Institucionales y de Contacto")
             cols_info = st.columns(3)
             with cols_info[0]:
@@ -454,8 +509,7 @@ with tab_auditoria:
             with cols_info[2]:
                 st.markdown(f"**📊 Cupos Solicitados:** {escuela.get('cupos_solicitados', '-')}")
                 st.markdown(f"**👨‍🏫 Docentes Acompañantes:** {escuela.get('docentes_acompanantes', '-')}")
-                estado_actual = escuela.get('estado', 'PREINSCRIPTO')
-                st.markdown(f"**📌 Estado del Legajo:** `{estado_actual}`")
+                st.markdown(f"**📌 Estado del Legajo:** `{estado_legajo}`")
                 st.markdown(f"**📅 Fecha Registro:** {escuela.get('fecha_registro', '-')}")
 
             st.markdown("---")
