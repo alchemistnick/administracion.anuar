@@ -415,168 +415,154 @@ with tab_dash:
     else:
         st.info("No hay delegaciones registradas para este modelo.")
 
+
+# =========================================================================
+# COMPONENTE UNIFICADO: FICHA NOMINAL Y AUDITORÍA DE LEGAJOS
+# =========================================================================
+def renderizar_modulo_unificado_delegacion(id_modelo):
+    delegaciones_ficha = obtener_delegaciones_por_modelo(id_modelo)
+
+    if not delegaciones_ficha:
+        st.info("No hay instituciones registradas para este modelo.")
+        return
+
+    busqueda = st.text_input("🔍 Buscar por Nombre de Escuela o Email:", key=f"busq_{id_modelo}").strip()
+    escuelas_filtradas = [
+        d for d in delegaciones_ficha 
+        if busqueda.lower() in str(d.get("nombre_colegio", "")).lower() 
+        or busqueda.lower() in str(d.get("id", "")).lower()
+    ]
+
+    if not escuelas_filtradas:
+        st.warning("No se encontraron instituciones con ese criterio de búsqueda.")
+        return
+
+    opciones_escuelas = {f"[{d.get('id')}] {d.get('nombre_colegio', 'Sin Nombre')}": d for d in escuelas_filtradas}
+    escuela_label = st.selectbox("Seleccionar Institución:", list(opciones_escuelas.keys()), key=f"sel_esc_{id_modelo}")
+    escuela = opciones_escuelas[escuela_label]
+    id_del = escuela.get("id")
+
+    st.markdown("### 📋 Datos Institucionales y de Contacto")
+    cols_info = st.columns(3)
+    with cols_info[0]:
+        st.markdown(f"**🏛️ Institución:** {escuela.get('nombre_colegio', '-')}")
+        st.markdown(f"**📍 Dirección:** {escuela.get('direccion_escuela', '-')}")
+        st.markdown(f"**📧 Email Institucional:** {escuela.get('email_institucional', '-')}")
+        st.markdown(f"**📞 Teléfono Institucional:** {escuela.get('telefono_institucional', '-')}")
+    with cols_info[1]:
+        st.markdown(f"**👤 Responsable / Docente:** {escuela.get('docente_apellido_nombre', '-')}")
+        st.markdown(f"**📧 Email Docente (Usuario):** `{escuela.get('docente_email', '-')}`")
+        st.markdown(f"**📱 Teléfono Móvil:** {escuela.get('docente_telefono', '-')}")
+        st.markdown(f"**🔑 Clave Hash:** `{escuela.get('secret_hash', '-')}`")
+    with cols_info[2]:
+        st.markdown(f"**📊 Cupos Solicitados:** {escuela.get('cupos_solicitados', '-')}")
+        st.markdown(f"**👨‍🏫 Docentes Acompañantes:** {escuela.get('docentes_acompanantes', '-')}")
+        estado_actual = escuela.get('estado', 'PREINSCRIPTO')
+        st.markdown(f"**📌 Estado del Legajo:** `{estado_actual}`")
+        st.markdown(f"**📅 Fecha Registro:** {escuela.get('fecha_registro', '-')}")
+
+    st.markdown("---")
+    st.markdown("### 🇺🇳 Detalle de Comités y Secciones Solicitadas")
+    desglose_raw = escuela.get('desglose_modalidades', "{}")
+    try:
+        import ast
+        desglose_dict = ast.literal_eval(desglose_raw) if isinstance(desglose_raw, str) else desglose_raw
+    except Exception:
+        desglose_dict = {}
+
+    if desglose_dict and isinstance(desglose_dict, dict):
+        for seccion, cantidad in desglose_dict.items():
+            st.markdown(f"- **Sección / Tipo de Comité:** `{seccion}` ➔ **Cantidad de Delegaciones:** **{cantidad}**")
+    else:
+        st.info("No hay un desglose de comités registrado.")
+
+    st.markdown("---")
+    st.markdown("### 💳 Asignación Manual de Costo y Notificación")
+    col_fin1, col_fin2 = st.columns([2, 1])
+    with col_fin1:
+        monto_asignado = st.number_input(
+            "Monto a abonar por la institución ($):",
+            min_value=0.0,
+            value=float(escuela.get("costo_asignado", 0.0)),
+            step=100.0,
+            key=f"monto_{id_del}_{id_modelo}"
+        )
+    with col_fin2:
+        st.write("")
+        st.write("")
+        if st.button("💾 Guardar y Enviar Monto por Mail", key=f"btn_enviar_monto_{id_del}_{id_modelo}"):
+            db.collection("delegaciones").document(id_del).set(
+                {"costo_asignado": float(monto_asignado)}, merge=True
+            )
+            notificar_accion_script("ENVIAR_COSTO_INSTITUCION", {
+                "id_delegacion": id_del,
+                "costo_total": float(monto_asignado),
+                "desglose": escuela.get('desglose_modalidades', '')
+            })
+            st.success("¡Monto guardado y notificación enviada al docente con éxito!")
+            st.rerun()
+
+    st.markdown("---")
+    st.markdown("### ⚖️ Acciones y Aprobaciones del Legajo")
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("✅ Aprobar Legajo Completo", key=f"aprobar_{id_del}_{id_modelo}"):
+            if actualizar_estado_delegacion(id_del, "APROBADO"):
+                notificar_accion_script("APROBAR_LEGAJO_ESCUELA", {"id_delegacion": id_del})
+                st.success("¡Institución aprobada con éxito!")
+                st.rerun()
+    with col_btn2:
+        motivo_rechazo = st.text_input("Motivo de observación/rechazo:", key=f"mot_{id_del}_{id_modelo}")
+        if st.button("⚠️ Rechazar / Observar", key=f"rech_{id_del}_{id_modelo}"):
+            if actualizar_estado_delegacion(id_del, "OBSERVADO"):
+                notificar_accion_script("RECHAZAR_LEGAJO_ESCUELA", {
+                    "id_delegacion": id_del,
+                    "motivo": motivo_rechazo or "Revisar documentación faltante."
+                })
+                st.warning("Se ha marcado como observado y notificado.")
+                st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 👥 Nómina de Estudiantes y Documentación Adjunta")
+    registros_escuela = obtener_integrantes_delegacion(id_del)
+    if registros_escuela:
+        df_alumnos = pd.DataFrame(registros_escuela).astype(str)
+        st.dataframe(df_alumnos, use_container_width=True)
+        descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
+
+        st.markdown("#### 📂 Auditoría Individual de Alumnos")
+        for est in registros_escuela:
+            with st.expander(f"👤 {est.get('nombre')} {est.get('apellido')} (DNI: {est.get('dni')})"):
+                col_e1, col_e2 = st.columns(2)
+                with col_e1:
+                    st.write(f"**Alergias / Condiciones:** {est.get('alergias_medicas', 'Ninguna')}")
+                    st.write(f"**Asignación:** {est.get('id_asignacion', 'Sin asignar')}")
+                    st.write(f"**Observaciones:** {est.get('comentarios', 'Ninguna')}")
+                with col_e2:
+                    ficha_url = est.get("ficha_medica_id", "")
+                    aut_url = est.get("autorizacion_id", "")
+
+                    if ficha_url:
+                        st.markdown(f"[📄 Ver Ficha Médica]({ficha_url})", unsafe_allow_html=True)
+                    else:
+                        st.write("⚠️ Sin Ficha Médica cargada.")
+
+                    if aut_url:
+                        st.markdown(f"[✍️ Ver Autorización Firmada]({aut_url})", unsafe_allow_html=True)
+                    else:
+                        st.write("⚠️ Sin Autorización cargada.")
+    else:
+        st.info("No hay integrantes cargados en esta institución.")
+
+
 with tab_ficha:
-    st.subheader(f"🏫 Ficha Integral por Institución — {modelo_seleccionado}")
-    delegaciones_ficha = obtener_delegaciones_por_modelo(id_modelo_actual)
-
-    if delegaciones_ficha:
-        busqueda = st.text_input("🔍 Buscar por Nombre de Escuela o Email:").strip()
-        escuelas_filtradas = [d for d in delegaciones_ficha if busqueda.lower() in str(d.get("nombre_colegio", "")).lower() or busqueda.lower() in str(d.get("id", "")).lower()]
-
-        if escuelas_filtradas:
-            opciones_escuelas = {f"[{d.get('id')}] {d.get('nombre_colegio', 'Sin Nombre')}": d for d in escuelas_filtradas}
-            escuela_label = st.selectbox("Seleccionar Institución:", list(opciones_escuelas.keys()))
-            escuela = opciones_escuelas[escuela_label]
-            id_del = escuela.get("id")
-
-            st.markdown("### 📋 Datos Institucionales y de Contacto")
-            cols_info = st.columns(3)
-            with cols_info[0]:
-                st.markdown(f"**🏛️ Institución:** {escuela.get('nombre_colegio', '-')}")
-                st.markdown(f"**📍 Dirección:** {escuela.get('direccion_escuela', '-')}")
-                st.markdown(f"**📧 Email Institucional:** {escuela.get('email_institucional', '-')}")
-                st.markdown(f"**📞 Teléfono Institucional:** {escuela.get('telefono_institucional', '-')}")
-            with cols_info[1]:
-                st.markdown(f"**👤 Responsable / Docente:** {escuela.get('docente_apellido_nombre', '-')}")
-                st.markdown(f"**📧 Email Docente (Usuario):** `{escuela.get('docente_email', '-')}`")
-                st.markdown(f"**📱 Teléfono Móvil:** {escuela.get('docente_telefono', '-')}")
-                st.markdown(f"**🔑 Clave Hash:** `{escuela.get('secret_hash', '-')}`")
-            with cols_info[2]:
-                st.markdown(f"**📊 Cupos Solicitados:** {escuela.get('cupos_solicitados', '-')}")
-                st.markdown(f"**👨‍🏫 Docentes Acompañantes:** {escuela.get('docentes_acompanantes', '-')}")
-                st.markdown(f"**📌 Estado del Legajo:** `{escuela.get('estado', 'PREINSCRIPTO')}`")
-                st.markdown(f"**📅 Fecha Registro:** {escuela.get('fecha_registro', '-')}")
-
-            st.markdown("---")
-            st.markdown("### 🇺🇳 Detalle de Comités y Secciones Solicitadas")
-            desglose_raw = escuela.get('desglose_modalidades', "{}")
-            try:
-                import ast
-                desglose_dict = ast.literal_eval(desglose_raw) if isinstance(desglose_raw, str) else desglose_raw
-            except Exception:
-                desglose_dict = {}
-
-            if desglose_dict and isinstance(desglose_dict, dict):
-                for seccion, cantidad in desglose_dict.items():
-                    st.markdown(f"- **Sección / Tipo de Comité:** `{seccion}` ➔ **Cantidad de Delegaciones:** **{cantidad}**")
-            else:
-                st.info("No hay un desglose de comités registrado.")
-
-            st.markdown("---")
-            st.markdown("### 👥 Nómina de Estudiantes y Documentación Adjunta")
-            registros_escuela = obtener_integrantes_delegacion(id_del)
-            if registros_escuela:
-                df_alumnos = pd.DataFrame(registros_escuela).astype(str)
-                st.dataframe(df_alumnos, use_container_width=True)
-                descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
-            else:
-                st.info("No hay integrantes cargados en esta institución.")
+    st.subheader(f"🏫 Ficha Nominal por Escuela — {modelo_seleccionado}")
+    renderizar_modulo_unificado_delegacion(id_modelo_actual)
 
 with tab_auditoria:
-    st.subheader(f"🔍 Auditoría y Aprobaciones — {modelo_seleccionado}")
-    delegaciones_aud = obtener_delegaciones_por_modelo(id_modelo_actual)
-    
-    if not delegaciones_aud:
-        st.info("No hay delegaciones para auditar.")
-    else:
-        for d in delegaciones_aud:
-            with st.expander(f"🏫 {d.get('nombre_colegio', 'Colegio')} — Docente: {d.get('docente_apellido_nombre', 'N/A')} ({d.get('id_delegacion')})"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.write(f"**Email Institucional:** {d.get('email_institucional')}")
-                    st.write(f"**Teléfono:** {d.get('telefono_institucional')}")
-                    st.write(f"**Localidad/Dir:** {d.get('direccion_escuela')}")
-                with col2:
-                    st.write(f"**Docente Responsable:** {d.get('docente_apellido_nombre')}")
-                    st.write(f"**Email Docente:** {d.get('docente_email')}")
-                    st.write(f"**Móvil Docente:** {d.get('docente_telefono')}")
-                with col3:
-                    st.write(f"**Cupos Solicitados:** {d.get('cupos_solicitados')}")
-                    st.write(f"**Acompañantes:** {d.get('docentes_acompanantes')}")
-                    estado_actual = d.get('estado', 'PREINSCRIPTO')
-                    st.markdown(f"**Estado Actual:** `{estado_actual}`")
-
-                st.markdown("---")
-                st.markdown("### 💳 Asignación Manual de Costo y Notificación")
-                col_fin1, col_fin2 = st.columns([2, 1])
-                with col_fin1:
-                    monto_asignado = st.number_input(
-                        "Monto a abonar por la institución ($):",
-                        min_value=0.0,
-                        value=float(d.get("costo_asignado", 0.0)),
-                        step=100.0,
-                        key=f"monto_{d.get('id_delegacion')}"
-                    )
-                with col_fin2:
-                    st.write("")
-                    st.write("")
-                    if st.button("💾 Guardar y Enviar Monto por Mail", key=f"btn_enviar_monto_{d.get('id_delegacion')}"):
-                        db.collection("delegaciones").document(d.get('id_delegacion')).set(
-                            {"costo_asignado": float(monto_asignado)}, merge=True
-                        )
-                        notificar_accion_script("ENVIAR_COSTO_INSTITUCION", {
-                            "id_delegacion": d.get('id_delegacion'),
-                            "costo_total": float(monto_asignado),
-                            "desglose": d.get('desglose_modalidades', '')
-                        })
-                        st.success("¡Monto guardado y notificación enviada al docente con éxito!")
-                        st.rerun()
-
-                st.markdown("---")
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    if st.button("✅ Aprobar Legajo Completo", key=f"aprobar_{d.get('id_delegacion')}"):
-                        if actualizar_estado_delegacion(d.get('id_delegacion'), "APROBADO"):
-                            notificar_accion_script("APROBAR_LEGAJO_ESCUELA", {"id_delegacion": d.get('id_delegacion')})
-                            st.success("¡Institución aprobada con éxito!")
-                            st.rerun()
-                with col_btn2:
-                    motivo_rechazo = st.text_input("Motivo de observación/rechazo:", key=f"mot_{d.get('id_delegacion')}")
-                    if st.button("⚠️ Rechazar / Observar", key=f"rech_{d.get('id_delegacion')}"):
-                        if actualizar_estado_delegacion(d.get('id_delegacion'), "OBSERVADO"):
-                            notificar_accion_script("RECHAZAR_LEGAJO_ESCUELA", {
-                                "id_delegacion": d.get('id_delegacion'),
-                                "motivo": motivo_rechazo or "Revisar documentación faltante."
-                            })
-                            st.warning("Se ha marcado como observado y notificado.")
-                            st.rerun()
-
-        st.markdown("---")
-        st.markdown("### 📋 Auditoría de Nómina y Estudiantes")
-        emails_del = [d.get("id_delegacion") for d in delegaciones_aud]
-        delegacion_sel = st.selectbox("Seleccionar Institución para ver Estudiantes:", emails_del, key="sel_aud_estudiantes")
-
-        if delegacion_sel:
-            st.markdown(f"Estudiantes de: `{delegacion_sel}`")
-            try:
-                integrantes_docs = db.collection("delegaciones").document(delegacion_sel).collection("integrantes").stream()
-                integrantes = [doc.to_dict() for doc in integrantes_docs]
-
-                if not integrantes:
-                    st.info("Esta institución aún no ha cargado estudiantes en su nómina.")
-                else:
-                    for est in integrantes:
-                        with st.expander(f"👤 {est.get('nombre')} {est.get('apellido')} (DNI: {est.get('dni')})"):
-                            col_e1, col_e2 = st.columns(2)
-                            with col_e1:
-                                st.write(f"**Alergias / Condiciones:** {est.get('alergias_medicas', 'Ninguna')}")
-                                st.write(f"**Asignación:** {est.get('id_asignacion', 'Sin asignar')}")
-                                st.write(f"**Observaciones:** {est.get('comentarios', 'Ninguna')}")
-                            with col_e2:
-                                ficha_url = est.get("ficha_medica_id", "")
-                                aut_url = est.get("autorizacion_id", "")
-
-                                if ficha_url:
-                                    st.markdown(f"[📄 Ver Ficha Médica]({ficha_url})", unsafe_allow_html=True)
-                                else:
-                                    st.write("⚠️ Sin Ficha Médica cargada.")
-
-                                if aut_url:
-                                    st.markdown(f"[✍️ Ver Autorización Firmada]({aut_url})", unsafe_allow_html=True)
-                                else:
-                                    st.write("⚠️ Sin Autorización cargada.")
-            except Exception as ex:
-                st.error(f"Error al cargar la nómina de integrantes: {ex}")
+    st.subheader(f"🔍 Auditoría de Legajos — {modelo_seleccionado}")
+    renderizar_modulo_unificado_delegacion(id_modelo_actual)
+# =========================================================================
 
 with tab_pagos:
     st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
