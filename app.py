@@ -338,12 +338,16 @@ def procesar_acreditacion_forms(df_forms, id_modelo):
 
 
 def notificar_accion_script(action, data):
+    """
+    Envía la solicitud POST a tu API_URL (Google Apps Script u otro servicio)
+    incluyendo de forma estructurada los campos: id_delegacion, email_docente, motivo, costo, etc.
+    """
     if not API_URL:
         return
     try:
         requests.post(API_URL, json={"action": action, "data": data}, timeout=5)
-    except Exception:
-        pass
+    except Exception as e:
+        st.warning(f"No se pudo notificar al servidor externo: {e}")
 
 
 def descargar_csv_para_excel(df, nombre_archivo):
@@ -454,7 +458,7 @@ with tab_dash:
 
 
 # =========================================================================
-# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON HISTORIAL Y NOTIFICACIONES
+# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON NOTIFICACIONES Y MOTIVO
 # =========================================================================
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría y Ficha Nominal — {modelo_seleccionado}")
@@ -552,6 +556,7 @@ with tab_auditoria:
                     )
                     notificar_accion_script("ENVIAR_COSTO_INSTITUCION", {
                         "id_delegacion": id_del,
+                        "email_docente": escuela.get('docente_email', ''),
                         "costo_total": float(monto_asignado),
                         "desglose": escuela.get('desglose_modalidades', '')
                     })
@@ -678,7 +683,12 @@ with tab_pagos:
                         nuevo_est = st.selectbox("Cambiar Estado:", ["PENDIENTE", "APROBADO", "RECHAZADO"], key=f"sel_pago_{id_pago}", index=idx_estado)
                         if st.button("💾 Actualizar", key=f"btn_pago_{id_pago}"):
                             if actualizar_estado_pago(id_pago, nuevo_est):
-                                notificar_accion_script("CAMBIAR_ESTADO_PAGO", {"id_pago": id_pago, "nuevo_estado": nuevo_est})
+                                notificar_accion_script("CAMBIAR_ESTADO_PAGO", {
+                                    "id_pago": id_pago,
+                                    "nuevo_estado": nuevo_est,
+                                    "id_delegacion": id_del,
+                                    "email_docente": mapa_colegios.get(id_del, "")
+                                })
                                 st.success("Actualizado.")
                                 st.rerun()
                 st.markdown("---")
