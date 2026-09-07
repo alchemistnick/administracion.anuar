@@ -419,14 +419,14 @@ with tab_dash:
 # =========================================================================
 # COMPONENTE UNIFICADO: FICHA NOMINAL Y AUDITORÍA DE LEGAJOS
 # =========================================================================
-def renderizar_modulo_unificado_delegacion(id_modelo):
+def renderizar_modulo_unificado_delegacion(id_modelo, sufijo_tab=""):
     delegaciones_ficha = obtener_delegaciones_por_modelo(id_modelo)
 
     if not delegaciones_ficha:
         st.info("No hay instituciones registradas para este modelo.")
         return
 
-    busqueda = st.text_input("🔍 Buscar por Nombre de Escuela o Email:", key=f"busq_{id_modelo}").strip()
+    busqueda = st.text_input("🔍 Buscar por Nombre de Escuela o Email:", key=f"busq_{id_modelo}_{sufijo_tab}").strip()
     escuelas_filtradas = [
         d for d in delegaciones_ficha 
         if busqueda.lower() in str(d.get("nombre_colegio", "")).lower() 
@@ -438,7 +438,7 @@ def renderizar_modulo_unificado_delegacion(id_modelo):
         return
 
     opciones_escuelas = {f"[{d.get('id')}] {d.get('nombre_colegio', 'Sin Nombre')}": d for d in escuelas_filtradas}
-    escuela_label = st.selectbox("Seleccionar Institución:", list(opciones_escuelas.keys()), key=f"sel_esc_{id_modelo}")
+    escuela_label = st.selectbox("Seleccionar Institución:", list(opciones_escuelas.keys()), key=f"sel_esc_{id_modelo}_{sufijo_tab}")
     escuela = opciones_escuelas[escuela_label]
     id_del = escuela.get("id")
 
@@ -485,12 +485,12 @@ def renderizar_modulo_unificado_delegacion(id_modelo):
             min_value=0.0,
             value=float(escuela.get("costo_asignado", 0.0)),
             step=100.0,
-            key=f"monto_{id_del}_{id_modelo}"
+            key=f"monto_{id_del}_{id_modelo}_{sufijo_tab}"
         )
     with col_fin2:
         st.write("")
         st.write("")
-        if st.button("💾 Guardar y Enviar Monto por Mail", key=f"btn_enviar_monto_{id_del}_{id_modelo}"):
+        if st.button("💾 Guardar y Enviar Monto por Mail", key=f"btn_enviar_monto_{id_del}_{id_modelo}_{sufijo_tab}"):
             db.collection("delegaciones").document(id_del).set(
                 {"costo_asignado": float(monto_asignado)}, merge=True
             )
@@ -506,14 +506,14 @@ def renderizar_modulo_unificado_delegacion(id_modelo):
     st.markdown("### ⚖️ Acciones y Aprobaciones del Legajo")
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
-        if st.button("✅ Aprobar Legajo Completo", key=f"aprobar_{id_del}_{id_modelo}"):
+        if st.button("✅ Aprobar Legajo Completo", key=f"aprobar_{id_del}_{id_modelo}_{sufijo_tab}"):
             if actualizar_estado_delegacion(id_del, "APROBADO"):
                 notificar_accion_script("APROBAR_LEGAJO_ESCUELA", {"id_delegacion": id_del})
                 st.success("¡Institución aprobada con éxito!")
                 st.rerun()
     with col_btn2:
-        motivo_rechazo = st.text_input("Motivo de observación/rechazo:", key=f"mot_{id_del}_{id_modelo}")
-        if st.button("⚠️ Rechazar / Observar", key=f"rech_{id_del}_{id_modelo}"):
+        motivo_rechazo = st.text_input("Motivo de observación/rechazo:", key=f"mot_{id_del}_{id_modelo}_{sufijo_tab}")
+        if st.button("⚠️ Rechazar / Observar", key=f"rech_{id_del}_{id_modelo}_{sufijo_tab}"):
             if actualizar_estado_delegacion(id_del, "OBSERVADO"):
                 notificar_accion_script("RECHAZAR_LEGAJO_ESCUELA", {
                     "id_delegacion": id_del,
@@ -528,7 +528,7 @@ def renderizar_modulo_unificado_delegacion(id_modelo):
     if registros_escuela:
         df_alumnos = pd.DataFrame(registros_escuela).astype(str)
         st.dataframe(df_alumnos, use_container_width=True)
-        descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
+        descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}_{sufijo_tab}")
 
         st.markdown("#### 📂 Auditoría Individual de Alumnos")
         for est in registros_escuela:
@@ -557,11 +557,11 @@ def renderizar_modulo_unificado_delegacion(id_modelo):
 
 with tab_ficha:
     st.subheader(f"🏫 Ficha Nominal por Escuela — {modelo_seleccionado}")
-    renderizar_modulo_unificado_delegacion(id_modelo_actual)
+    renderizar_modulo_unificado_delegacion(id_modelo_actual, sufijo_tab="ficha")
 
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría de Legajos — {modelo_seleccionado}")
-    renderizar_modulo_unificado_delegacion(id_modelo_actual)
+    renderizar_modulo_unificado_delegacion(id_modelo_actual, sufijo_tab="auditoria")
 # =========================================================================
 
 with tab_pagos:
