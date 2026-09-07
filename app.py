@@ -227,6 +227,8 @@ def actualizar_estado_delegacion(id_delegacion, estado, motivo=""):
         payload = {"estado": estado}
         if motivo:
             payload["motivo_rechazo"] = motivo
+        else:
+            payload["motivo_rechazo"] = firestore.DELETE_FIELD
         db.collection("delegaciones").document(str(id_delegacion)).set(payload, merge=True)
         return True
     except Exception as e:
@@ -293,9 +295,12 @@ def obtener_pagos_por_delegacion(id_delegacion):
         return []
 
 
-def actualizar_estado_pago(id_pago, nuevo_estado):
+def actualizar_estado_pago(id_pago, nuevo_estado, motivo=""):
     try:
-        db.collection("pagos").document(str(id_pago)).set({"estado_pago": nuevo_estado}, merge=True)
+        payload = {"estado_pago": nuevo_estado}
+        if motivo:
+            payload["motivo_rechazo_pago"] = motivo
+        db.collection("pagos").document(str(id_pago)).set(payload, merge=True)
         return True
     except Exception as e:
         st.error(f"Error al actualizar estado del pago: {e}")
@@ -338,10 +343,6 @@ def procesar_acreditacion_forms(df_forms, id_modelo):
 
 
 def notificar_accion_script(action, data):
-    """
-    Envía la solicitud POST a tu API_URL (Google Apps Script u otro servicio)
-    incluyendo de forma estructurada los campos: id_delegacion, email_docente, motivo, costo, etc.
-    """
     if not API_URL:
         return
     try:
@@ -458,7 +459,7 @@ with tab_dash:
 
 
 # =========================================================================
-# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON NOTIFICACIONES Y MOTIVO
+# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON FORMULARIO DE MOTIVO SEGURO
 # =========================================================================
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría y Ficha Nominal — {modelo_seleccionado}")
@@ -566,7 +567,9 @@ with tab_auditoria:
             st.markdown("---")
             st.markdown("### ⚖️ Acciones y Aprobaciones del Legajo")
             
+            # Usamos un formulario estable para el rechazo/observación para evitar que se borre el texto al hacer clic
             col_btn1, col_btn2 = st.columns(2)
+            
             with col_btn1:
                 st.write("#### 🟢 Aprobar")
                 if st.button("✅ Aprobar Legajo Completo", key=f"aprobar_{id_del}"):
@@ -580,24 +583,25 @@ with tab_auditoria:
 
             with col_btn2:
                 st.write("#### 🔴 Rechazar / Observar")
-                motivo_rechazo = st.text_area(
-                    "Explique el motivo del rechazo o las correcciones necesarias:", 
-                    value=escuela.get("motivo_rechazo", ""),
-                    placeholder="Ej: Faltan firmar las autorizaciones de los estudiantes...",
-                    key=f"mot_{id_del}"
-                )
-                if st.button("⚠️ Enviar Rechazo / Observación", key=f"rech_{id_del}"):
-                    if not motivo_rechazo.strip():
-                        st.error("Por favor, ingrese un motivo antes de rechazar u observar el legajo.")
-                    else:
-                        if actualizar_estado_delegacion(id_del, "OBSERVADO", motivo=motivo_rechazo):
-                            notificar_accion_script("RECHAZAR_LEGAJO_ESCUELA", {
-                                "id_delegacion": id_del,
-                                "email_docente": escuela.get('docente_email', ''),
-                                "motivo": motivo_rechazo
-                            })
-                            st.warning("Se ha marcado como observado y se ha enviado la notificación por correo al docente.")
-                            st.rerun()
+                with st.form(key=f"form_rechazo_{id_del}"):
+                    motivo_rechazo = st.text_area(
+                        "Explique el motivo del rechazo o las correcciones necesarias:", 
+                        value=escuela.get("motivo_rechazo", ""),
+                        placeholder="Ej: Faltan firmar las autorizaciones de los estudiantes..."
+                    )
+                    submit_rechazo = st.form_submit_button("⚠️ Enviar Rechazo / Observación")
+                    if submit_rechazo:
+                        if not motivo_rechazo.strip():
+                            st.error("Por favor, ingrese un motivo antes de rechazar u observar el legajo.")
+                        else:
+                            if actualizar_estado_delegacion(id_del, "OBSERVADO", motivo=motivo_rechazo):
+                                notificar_accion_script("RECHAZAR_LEGAJO_ESCUELA", {
+                                    "id_delegacion": id_del,
+                                    "email_docente": escuela.get('docente_email', ''),
+                                    "motivo": motivo_rechazo
+                                })
+                                st.warning("Se ha marcado como observado y se ha enviado la notificación por correo al docente.")
+                                st.rerun()
 
             st.markdown("---")
             st.markdown("### 👥 Nómina de Estudiantes y Documentación Adjunta")
@@ -641,11 +645,13 @@ with tab_pagos:
     else:
         delegaciones_lista = obtener_delegaciones_por_modelo(id_modelo_actual)
         mapa_colegios = {d.get("id_delegacion"): d.get("nombre_colegio", "Colegio sin nombre") for d in delegaciones_lista}
+        mapa_emails = {d.get("id_delegacion"): d.get("docente_email", "") for d in delegaciones_lista}
 
         for p in pagos:
             with st.container():
                 id_del = p.get('id_delegacion')
                 nombre_escuela = mapa_colegios.get(id_del, "Institución no encontrada")
+                email_doc = mapa_emails.get(id_del, "")
                 es_huerfano = id_del not in mapa_colegios
 
                 col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 2, 2])
@@ -681,15 +687,20 @@ with tab_pagos:
                         idx_estado = ["PENDIENTE", "APROBADO", "RECHAZADO"].index(estado_actual) if estado_actual in ["PENDIENTE", "APROBADO", "RECHAZADO"] else 0
                         
                         nuevo_est = st.selectbox("Cambiar Estado:", ["PENDIENTE", "APROBADO", "RECHAZADO"], key=f"sel_pago_{id_pago}", index=idx_estado)
-                        if st.button("💾 Actualizar", key=f"btn_pago_{id_pago}"):
-                            if actualizar_estado_pago(id_pago, nuevo_est):
+                        motivo_pago = ""
+                        if nuevo_est == "RECHAZADO":
+                            motivo_pago = st.text_input("Motivo de rechazo del pago:", key=f"mot_pago_{id_pago}")
+
+                        if st.button("💾 Actualizar Pago", key=f"btn_pago_{id_pago}"):
+                            if actualizar_estado_pago(id_pago, nuevo_est, motivo=motivo_pago):
                                 notificar_accion_script("CAMBIAR_ESTADO_PAGO", {
                                     "id_pago": id_pago,
                                     "nuevo_estado": nuevo_est,
                                     "id_delegacion": id_del,
-                                    "email_docente": mapa_colegios.get(id_del, "")
+                                    "email_docente": email_doc,
+                                    "motivo": motivo_pago
                                 })
-                                st.success("Actualizado.")
+                                st.success("Estado de pago actualizado y notificado.")
                                 st.rerun()
                 st.markdown("---")
 
