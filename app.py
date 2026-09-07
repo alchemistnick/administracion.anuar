@@ -126,6 +126,32 @@ def obtener_delegaciones_por_modelo(id_modelo=None):
         return []
 
 
+def obtener_asignaciones_por_modelo(id_modelo):
+    try:
+        docs = db.collection_group("asignaciones").where("id_modelo", "==", str(id_modelo)).stream()
+        asignaciones = []
+        for doc in docs:
+            a = doc.to_dict()
+            a["id_asignacion"] = doc.id
+            asignaciones.append(a)
+        return asignaciones
+    except Exception as e:
+        return []
+
+
+def obtener_asignaciones_por_delegacion(id_delegacion):
+    try:
+        docs = db.collection("delegaciones").document(str(id_delegacion)).collection("asignaciones").stream()
+        asignaciones = []
+        for doc in docs:
+            a = doc.to_dict()
+            a["id_asignacion"] = doc.id
+            asignaciones.append(a)
+        return asignaciones
+    except Exception as e:
+        return []
+
+
 def ejecutar_sorteo_automatico(id_modelo):
     try:
         catalogo_paises = obtener_catalogo_paises(id_modelo)
@@ -459,7 +485,7 @@ with tab_dash:
 
 
 # =========================================================================
-# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON FORMULARIO DE MOTIVO SEGURO
+# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON ASIGNACIONES INCLUIDAS
 # =========================================================================
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría y Ficha Nominal — {modelo_seleccionado}")
@@ -523,6 +549,17 @@ with tab_auditoria:
                 st.markdown(f"**📅 Fecha Registro:** {escuela.get('fecha_registro', '-')}")
 
             st.markdown("---")
+            st.markdown("### 🌍 Países y Bancas Asignadas (Sorteo)")
+            asignaciones_inst = obtener_asignaciones_por_delegacion(id_del)
+            if asignaciones_inst:
+                df_asig_inst = pd.DataFrame(asignaciones_inst)[["seccion", "delegacion_nro", "organo", "pais"]].astype(str)
+                df_asig_inst.columns = ["Sección", "N° Delegación", "Órgano / Comité", "País Asignado"]
+                st.dataframe(df_asig_inst, use_container_width=True)
+                descargar_csv_para_excel(df_asig_inst, f"asignaciones_{id_del}")
+            else:
+                st.info("⚠️ Aún no se han realizado asignaciones de países para esta institución (ejecute el sorteo en Configuración).")
+
+            st.markdown("---")
             st.markdown("### 🇺🇳 Detalle de Comités y Secciones Solicitadas")
             desglose_raw = escuela.get('desglose_modalidades', "{}")
             try:
@@ -567,9 +604,7 @@ with tab_auditoria:
             st.markdown("---")
             st.markdown("### ⚖️ Acciones y Aprobaciones del Legajo")
             
-            # Usamos un formulario estable para el rechazo/observación para evitar que se borre el texto al hacer clic
             col_btn1, col_btn2 = st.columns(2)
-            
             with col_btn1:
                 st.write("#### 🟢 Aprobar")
                 if st.button("✅ Aprobar Legajo Completo", key=f"aprobar_{id_del}"):
@@ -770,11 +805,11 @@ with tab_config:
                     mapa_pais_organos[pais] = organos_seleccionados
 
                 st.markdown("---")
-                if st.button("💾 Guardar Catálogo y Presencia de Órganos"):
+                if st.button("💾 Guardar Catálogo y Presencia de Órganos", key="btn_guardar_cat_paises"):
                     catalogo_estructurado = [{"pais": p, "organos_permitidos": orgs} for p, orgs in mapa_pais_organos.items()]
                     if guardar_catalogo_paises(id_modelo_actual, catalogo_estructurado):
-                        st.success("🎉 ¡Catálogo de países guardado exitosamente!")
-                        st.rerun()
+                        st.success("🎉 ¡Catálogo de países y restricciones guardado y confirmado exitosamente en la base de datos!")
+                        st.balloons()
 
     with subtab_sorteo:
         st.markdown("### 🎲 Generador y Sorteo de Asignaciones")
@@ -785,6 +820,17 @@ with tab_config:
                 st.success(msg_sorteo)
             else:
                 st.error(msg_sorteo)
+
+        st.markdown("---")
+        st.markdown("### 📊 Auditoría General de Asignaciones (Resultado del Sorteo)")
+        asignaciones_totales = obtener_asignaciones_por_modelo(id_modelo_actual)
+        if asignaciones_totales:
+            df_asig_global = pd.DataFrame(asignaciones_totales)[["id_modelo", "seccion", "delegacion_nro", "organo", "pais"]].astype(str)
+            df_asig_global.columns = ["ID Modelo", "Sección", "N° Delegación", "Órgano / Comité", "País Asignado"]
+            st.dataframe(df_asig_global, use_container_width=True)
+            descargar_csv_para_excel(df_asig_global, f"asignaciones_globales_{id_modelo_actual}")
+        else:
+            st.info("No se registran asignaciones de países generadas todavía para este modelo.")
 
     with subtab_formulario:
         st.markdown("### 📋 Diseñador de Campos Adicionales y Condicionales")
