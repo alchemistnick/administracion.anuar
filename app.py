@@ -302,6 +302,15 @@ def actualizar_estado_pago(id_pago, nuevo_estado):
         return False
 
 
+def eliminar_pago(id_pago):
+    try:
+        db.collection("pagos").document(str(id_pago)).delete()
+        return True
+    except Exception as e:
+        st.error(f"Error al eliminar pago: {e}")
+        return False
+
+
 def procesar_acreditacion_forms(df_forms, id_modelo):
     nominas_oficiales = obtener_nominas_por_modelo(id_modelo)
     dnis_oficiales = {str(n.get("dni")).strip(): n for n in nominas_oficiales if n.get("dni")}
@@ -406,7 +415,6 @@ with tab_dash:
     nominas = obtener_nominas_por_modelo(id_modelo_actual)
     pagos = obtener_todos_pagos(id_modelo_actual)
     
-    # Métricas y cálculos financieros globales
     total_recaudacion_esperada = sum(float(d.get("costo_asignado", 0.0)) for d in delegaciones)
     pagos_aprobados_lista = [p for p in pagos if str(p.get("estado_pago", "")).upper() == "APROBADO"]
     total_recaudacion_cobrada = sum(float(p.get("monto") or p.get("monto_abonado") or 0.0) for p in pagos_aprobados_lista)
@@ -470,9 +478,6 @@ with tab_auditoria:
             escuela = opciones_escuelas[escuela_label]
             id_del = escuela.get("id")
 
-            # -------------------------------------------------------------
-            # SECCIÓN: HISTORIAL DE ACCIONES Y ESTADO DEL TRÁMITE
-            # -------------------------------------------------------------
             st.markdown("### 📋 Historial de Acciones y Estado del Trámite")
             
             costo_asignado = float(escuela.get("costo_asignado", 0.0))
@@ -559,7 +564,7 @@ with tab_auditoria:
             with col_btn1:
                 if st.button("✅ Aprobar Legajo Completo", key=f"aprobar_{id_del}"):
                     if actualizar_estado_delegacion(id_del, "APROBADO"):
-                        notificar_accion_script("APROBAR_LEGAJO_ESCUELA", {"id_delegacion": id_del})
+                        notificar_accion_script("APROBADO_LEGAJO_ESCUELA", {"id_delegacion": id_del})
                         st.success("¡Institución aprobada con éxito!")
                         st.rerun()
             with col_btn2:
@@ -620,10 +625,14 @@ with tab_pagos:
             with st.container():
                 id_del = p.get('id_delegacion')
                 nombre_escuela = mapa_colegios.get(id_del, "Institución no encontrada")
+                es_huerfano = id_del not in mapa_colegios
 
                 col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 2, 2])
                 with col_p1:
-                    st.markdown(f"**🏫 {nombre_escuela}**")
+                    if es_huerfano:
+                        st.markdown(f"**❌ Institución eliminada o huérfana**")
+                    else:
+                        st.markdown(f"**🏫 {nombre_escuela}**")
                     st.caption(f"📧 `{id_del}`")
                 with col_p2:
                     monto_val = p.get('monto') or p.get('monto_abonado') or 0.0
@@ -641,15 +650,21 @@ with tab_pagos:
                         st.error("❌ Sin enlace adjunto")
                 with col_p4:
                     id_pago = p.get('id_pago')
-                    estado_actual = p.get("estado_pago", "PENDIENTE")
-                    idx_estado = ["PENDIENTE", "APROBADO", "RECHAZADO"].index(estado_actual) if estado_actual in ["PENDIENTE", "APROBADO", "RECHAZADO"] else 0
-                    
-                    nuevo_est = st.selectbox("Cambiar Estado:", ["PENDIENTE", "APROBADO", "RECHAZADO"], key=f"sel_pago_{id_pago}", index=idx_estado)
-                    if st.button("💾 Actualizar", key=f"btn_pago_{id_pago}"):
-                        if actualizar_estado_pago(id_pago, nuevo_est):
-                            notificar_accion_script("CAMBIAR_ESTADO_PAGO", {"id_pago": id_pago, "nuevo_estado": nuevo_est})
-                            st.success("Actualizado.")
-                            st.rerun()
+                    if es_huerfano:
+                        if st.button("🗑️ Eliminar Pago Huérfano", key=f"btn_del_pago_{id_pago}"):
+                            if eliminar_pago(id_pago):
+                                st.success("Comprobante huérfano eliminado correctamente.")
+                                st.rerun()
+                    else:
+                        estado_actual = p.get("estado_pago", "PENDIENTE")
+                        idx_estado = ["PENDIENTE", "APROBADO", "RECHAZADO"].index(estado_actual) if estado_actual in ["PENDIENTE", "APROBADO", "RECHAZADO"] else 0
+                        
+                        nuevo_est = st.selectbox("Cambiar Estado:", ["PENDIENTE", "APROBADO", "RECHAZADO"], key=f"sel_pago_{id_pago}", index=idx_estado)
+                        if st.button("💾 Actualizar", key=f"btn_pago_{id_pago}"):
+                            if actualizar_estado_pago(id_pago, nuevo_est):
+                                notificar_accion_script("CAMBIAR_ESTADO_PAGO", {"id_pago": id_pago, "nuevo_estado": nuevo_est})
+                                st.success("Actualizado.")
+                                st.rerun()
                 st.markdown("---")
 
 with tab_medicos:
