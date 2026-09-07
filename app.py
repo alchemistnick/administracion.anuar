@@ -23,7 +23,7 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
-API_URL = st.secrets.get("API_URL", "")
+API_URL = st.secrets["API_URL"]
 
 
 # ==========================================
@@ -328,15 +328,6 @@ def obtener_todos_pagos(id_modelo=None):
         return []
 
 
-def obtener_pagos_pendientes(id_modelo=None):
-    pagos = obtener_todos_pagos(id_modelo)
-    return [
-        p
-        for p in pagos
-        if str(p.get("estado_pago", "")).upper() == "PENDIENTE"
-    ]
-
-
 def actualizar_estado_pago(id_pago, nuevo_estado):
     try:
         db.collection("pagos").document(str(id_pago)).set(
@@ -423,7 +414,6 @@ if not st.session_state["admin_logueado"]:
             "Contraseña de Administración:", type="password"
         )
         if st.form_submit_button("Ingresar al Panel"):
-            # Comprobación segura de clave en st.secrets
             clave_Secreta = st.secrets.get("admin_logueado", "admin123")
             if pass_ingresada.strip() == str(clave_Secreta).strip():
                 st.session_state["admin_logueado"] = True
@@ -477,7 +467,8 @@ with tab_dash:
     st.subheader(f"📊 Panel General — {modelo_seleccionado}")
     delegaciones = obtener_delegaciones_por_modelo(id_modelo_actual)
     nominas = obtener_nominas_por_modelo(id_modelo_actual)
-    pagos_pendientes = obtener_pagos_pendientes(id_modelo_actual)
+    pagos = obtener_todos_pagos(id_modelo_actual)
+    pagos_pendientes = [p for p in pagos if str(p.get("estado_pago", "")).upper() == "PENDIENTE"]
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -611,7 +602,6 @@ with tab_auditoria:
                             st.warning("Se ha marcado como observado y notificado.")
                             st.rerun()
 
-        # Auditoría detallada de integrantes por institución en sub-sección
         st.markdown("---")
         st.markdown("### 📋 Auditoría de Nómina y Estudiantes")
         emails_del = [d.get("id_delegacion") for d in delegaciones_aud]
@@ -654,7 +644,7 @@ with tab_auditoria:
             except Exception as ex:
                 st.error(f"Error al cargar la nómina de integrantes: {ex}")
 
-# 4. PAGOS (Actualizado con Nombre de Escuela)
+# 4. PAGOS
 with tab_pagos:
     st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
     pagos = obtener_todos_pagos(id_modelo_actual)
@@ -662,7 +652,6 @@ with tab_pagos:
     if not pagos:
         st.info("No hay pagos registrados en el sistema para este modelo.")
     else:
-        # Diccionario auxiliar para buscar el nombre del colegio por su email/id_delegacion
         delegaciones_lista = obtener_delegaciones_por_modelo(id_modelo_actual)
         mapa_colegios = {d.get("id_delegacion"): d.get("nombre_colegio", "Colegio sin nombre") for d in delegaciones_lista}
 
@@ -683,7 +672,7 @@ with tab_pagos:
                     drive_url = p.get("drive_file_url") or p.get("drive_url") or ""
                     if drive_url:
                         if "folders/" in drive_url:
-                            st.warning("⚠️ Es una carpeta general (revisar subida)")
+                            st.warning("⚠️ Es una carpeta general")
                             st.markdown(f"[📁 Abrir Carpeta]({drive_url})", unsafe_allow_html=True)
                         else:
                             st.markdown(f"📄 [Abrir Comprobante]({drive_url})", unsafe_allow_html=True)
@@ -786,11 +775,6 @@ with tab_config:
 
     with subtab_catalogo:
         st.markdown("### 🌍 Catálogo de Países y Asignación de Órganos")
-        st.write(
-            "Pegue la lista de países y defina qué comités/órganos tiene"
-            " asignados cada uno."
-        )
-
         comites_modelo = obtener_parametros_comites(id_modelo_actual)
 
         lista_nombres_comites = sorted(
@@ -867,7 +851,7 @@ with tab_config:
                 st.error(msg_sorteo)
 
     with subtab_formulario:
-        st.markdown("### 📋 Diseñador de Campos Adicionales")
+        st.markdown("### 📋 Diseñador de Campos Adicionales y Condicionales")
         campos_actuales = obtener_esquema_formulario(id_modelo_actual)
         df_campos = (
             pd.DataFrame(campos_actuales)
