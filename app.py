@@ -454,7 +454,7 @@ with tab_dash:
 
 
 # =========================================================================
-# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON HISTORIAL DE ACCIONES
+# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON HISTORIAL Y NOTIFICACIONES
 # =========================================================================
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría y Ficha Nominal — {modelo_seleccionado}")
@@ -560,23 +560,39 @@ with tab_auditoria:
 
             st.markdown("---")
             st.markdown("### ⚖️ Acciones y Aprobaciones del Legajo")
+            
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
+                st.write("#### 🟢 Aprobar")
                 if st.button("✅ Aprobar Legajo Completo", key=f"aprobar_{id_del}"):
                     if actualizar_estado_delegacion(id_del, "APROBADO"):
-                        notificar_accion_script("APROBADO_LEGAJO_ESCUELA", {"id_delegacion": id_del})
-                        st.success("¡Institución aprobada con éxito!")
-                        st.rerun()
-            with col_btn2:
-                motivo_rechazo = st.text_input("Motivo de observación/rechazo:", key=f"mot_{id_del}")
-                if st.button("⚠️ Rechazar / Observar", key=f"rech_{id_del}"):
-                    if actualizar_estado_delegacion(id_del, "OBSERVADO"):
-                        notificar_accion_script("RECHAZAR_LEGAJO_ESCUELA", {
+                        notificar_accion_script("APROBAR_LEGAJO_ESCUELA", {
                             "id_delegacion": id_del,
-                            "motivo": motivo_rechazo or "Revisar documentación faltante."
+                            "email_docente": escuela.get('docente_email', '')
                         })
-                        st.warning("Se ha marcado como observado y notificado.")
+                        st.success("¡Institución aprobada y correo de aceptación enviado con éxito!")
                         st.rerun()
+
+            with col_btn2:
+                st.write("#### 🔴 Rechazar / Observar")
+                motivo_rechazo = st.text_area(
+                    "Explique el motivo del rechazo o las correcciones necesarias:", 
+                    value=escuela.get("motivo_rechazo", ""),
+                    placeholder="Ej: Faltan firmar las autorizaciones de los estudiantes...",
+                    key=f"mot_{id_del}"
+                )
+                if st.button("⚠️ Enviar Rechazo / Observación", key=f"rech_{id_del}"):
+                    if not motivo_rechazo.strip():
+                        st.error("Por favor, ingrese un motivo antes de rechazar u observar el legajo.")
+                    else:
+                        if actualizar_estado_delegacion(id_del, "OBSERVADO", motivo=motivo_rechazo):
+                            notificar_accion_script("RECHAZAR_LEGAJO_ESCUELA", {
+                                "id_delegacion": id_del,
+                                "email_docente": escuela.get('docente_email', ''),
+                                "motivo": motivo_rechazo
+                            })
+                            st.warning("Se ha marcado como observado y se ha enviado la notificación por correo al docente.")
+                            st.rerun()
 
             st.markdown("---")
             st.markdown("### 👥 Nómina de Estudiantes y Documentación Adjunta")
