@@ -485,7 +485,7 @@ with tab_dash:
 
 
 # =========================================================================
-# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON ASIGNACIONES INCLUIDAS
+# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON LINKS CORREGIDOS
 # =========================================================================
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría y Ficha Nominal — {modelo_seleccionado}")
@@ -646,7 +646,7 @@ with tab_auditoria:
                 st.dataframe(df_alumnos, use_container_width=True)
                 descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
 
-                st.markdown("#### 📂 Auditoría Individual de Alumnos")
+                st.markdown("#### 📂 Auditoría Individual de Alumnos y Enlaces a Documentos")
                 for est in registros_escuela:
                     with st.expander(f"👤 {est.get('nombre')} {est.get('apellido')} (DNI: {est.get('dni')})"):
                         col_e1, col_e2 = st.columns(2)
@@ -655,18 +655,19 @@ with tab_auditoria:
                             st.write(f"**Asignación:** {est.get('id_asignacion', 'Sin asignar')}")
                             st.write(f"**Observaciones:** {est.get('comentarios', 'Ninguna')}")
                         with col_e2:
-                            ficha_url = est.get("ficha_medica_id", "")
-                            aut_url = est.get("autorizacion_id", "")
+                            # Recuperamos los enlaces asegurando que lea correctamente las claves de la base de datos
+                            ficha_url = est.get("ficha_medica_id") or est.get("ficha_url") or ""
+                            aut_url = est.get("autorizacion_id") or est.get("autorizacion_url") or ""
 
-                            if ficha_url:
-                                st.markdown(f"[📄 Ver Ficha Médica]({ficha_url})", unsafe_allow_html=True)
+                            if ficha_url and str(ficha_url).startswith("http"):
+                                st.markdown(f"📄 **[Ver Ficha Médica]({ficha_url})**", unsafe_allow_html=True)
                             else:
-                                st.write("⚠️ Sin Ficha Médica cargada.")
+                                st.warning("⚠️ Sin Ficha Médica cargada o enlace no válido.")
 
-                            if aut_url:
-                                st.markdown(f"[✍️ Ver Autorización Firmada]({aut_url})", unsafe_allow_html=True)
+                            if aut_url and str(aut_url).startswith("http"):
+                                st.markdown(f"✍️ **[Ver Autorización Firmada]({aut_url})**", unsafe_allow_html=True)
                             else:
-                                st.write("⚠️ Sin Autorización cargada.")
+                                st.warning("⚠️ Sin Autorización cargada o enlace no válido.")
             else:
                 st.info("No hay integrantes cargados en esta institución.")
 # =========================================================================
@@ -701,15 +702,16 @@ with tab_pagos:
                     st.write(f"**Monto:**\n${float(monto_val):.2f}")
                     st.write(f"**Estado:** `{p.get('estado_pago', 'PENDIENTE')}`")
                 with col_p3:
-                    drive_url = p.get("drive_file_url") or p.get("drive_url") or ""
-                    if drive_url:
+                    # Recuperamos de forma robusta el link del comprobante de pago
+                    drive_url = p.get("drive_file_url") or p.get("drive_url") or p.get("url") or ""
+                    if drive_url and str(drive_url).startswith("http"):
                         if "folders/" in drive_url:
                             st.warning("⚠️ Es una carpeta general")
                             st.markdown(f"[📁 Abrir Carpeta]({drive_url})", unsafe_allow_html=True)
                         else:
-                            st.markdown(f"📄 [Abrir Comprobante]({drive_url})", unsafe_allow_html=True)
+                            st.markdown(f"📄 **[Abrir Comprobante]({drive_url})**", unsafe_allow_html=True)
                     else:
-                        st.error("❌ Sin enlace adjunto")
+                        st.error("❌ Sin enlace adjunto válido")
                 with col_p4:
                     id_pago = p.get('id_pago')
                     if es_huerfano:
