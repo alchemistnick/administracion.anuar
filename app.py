@@ -655,7 +655,6 @@ with tab_auditoria:
                             st.write(f"**Asignación:** {est.get('id_asignacion', 'Sin asignar')}")
                             st.write(f"**Observaciones:** {est.get('comentarios', 'Ninguna')}")
                         with col_e2:
-                            # Recuperamos los enlaces asegurando que lea correctamente las claves de la base de datos
                             ficha_url = est.get("ficha_medica_id") or est.get("ficha_url") or ""
                             aut_url = est.get("autorizacion_id") or est.get("autorizacion_url") or ""
 
@@ -702,7 +701,6 @@ with tab_pagos:
                     st.write(f"**Monto:**\n${float(monto_val):.2f}")
                     st.write(f"**Estado:** `{p.get('estado_pago', 'PENDIENTE')}`")
                 with col_p3:
-                    # Recuperamos de forma robusta el link del comprobante de pago
                     drive_url = p.get("drive_file_url") or p.get("drive_url") or p.get("url") or ""
                     if drive_url and str(drive_url).startswith("http"):
                         if "folders/" in drive_url:
@@ -777,12 +775,18 @@ with tab_config:
     with subtab_comites:
         st.markdown("### 🏛️ Estructura de Órganos y Comités")
         comites_actuales = obtener_parametros_comites(id_modelo_actual)
-        df_comites = pd.DataFrame(comites_actuales) if comites_actuales else pd.DataFrame(columns=["clave_seccion", "organo_comite", "integrantes_por_banca", "requiere_marca", "max_delegaciones_seccion"])
+        
+        # Agregamos la columna 'excluye_secciones' para soportar reglas de exclusión/bloqueo
+        df_comites = pd.DataFrame(comites_actuales) if comites_actuales else pd.DataFrame(columns=["clave_seccion", "organo_comite", "integrantes_por_banca", "requiere_marca", "max_delegaciones_seccion", "excluye_secciones"])
+        if "excluye_secciones" not in df_comites.columns:
+            df_comites["excluye_secciones"] = ""
 
+        st.info("💡 En la columna **excluye_secciones** puedes indicar (separadas por comas) qué claves de sección se bloquean o son incompatibles si un colegio selecciona esta.")
         df_comites_editado = st.data_editor(df_comites, num_rows="dynamic", key="editor_parametros_comites")
+        
         if st.button("💾 Guardar Parámetros de Comités"):
             guardar_parametros_comites(id_modelo_actual, df_comites_editado.to_dict(orient="records"))
-            st.success("Parámetros actualizados.")
+            st.success("Parámetros y reglas de exclusión actualizados con éxito.")
             st.rerun()
 
     with subtab_catalogo:
