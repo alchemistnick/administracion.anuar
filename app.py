@@ -1034,7 +1034,7 @@ with tab_config:
 
         comites_actuales = obtener_parametros_comites(id_modelo_actual)
         
-        df_comites = pd.DataFrame(comites_actuales) if comites_actuales else pd.DataFrame(columns=["clave_seccion", "organo_comite", "integrantes_por_banca", "requiere_marca", "max_delegaciones_seccion", "excluye_secciones"])
+        df_comites = pd.DataFrame(comites_actuales) if comites_actuales else pd.DataFrame(columns=["clave_seccion", "organo_comite", "integrantes_por_banca", "max_delegaciones_seccion", "excluye_secciones"])
         if "excluye_secciones" not in df_comites.columns:
             df_comites["excluye_secciones"] = ""
 
