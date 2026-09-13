@@ -231,7 +231,7 @@ def ejecutar_sorteo_automatico(id_modelo):
                             doc_ref = db.collection("delegaciones").document(email_docente).collection("asignaciones").document(asig_id)
 
                             payload = {
-                                "id_modelo": id_modelo,
+                                "id_modelo": str(id_modelo),
                                 "seccion": sec_nombre,
                                 "delegacion_nro": del_index,
                                 "organo_comite": organo,
@@ -675,7 +675,6 @@ with tab_pagos:
     if not pagos:
         st.info("No hay pagos registrados en el sistema para este modelo.")
     else:
-        # BOTÓN DE DESCARGA PARA GESTIÓN DE PAGOS
         df_pagos_export = pd.DataFrame(pagos).astype(str)
         descargar_csv_para_excel(df_pagos_export, f"reporte_pagos_{id_modelo_actual}")
         st.markdown("---")
@@ -731,7 +730,6 @@ with tab_pagos:
                         if st.button("💾 Actualizar Pago", key=f"btn_pago_{id_pago}"):
                             if actualizar_estado_pago(id_pago, nuevo_est, motivo=motivo_pago):
                                 
-                                # ELIMINAR RECHAZADOS ANTERIORES AL APROBAR UN NUEVO PAGO
                                 if nuevo_est == "APROBADO":
                                     pagos_previos = obtener_pagos_por_delegacion(id_del)
                                     for pago_prev in pagos_previos:
@@ -834,6 +832,7 @@ with tab_config:
             if ok_sorteo:
                 st.balloons()
                 st.success(msg_sorteo)
+                st.rerun()
             else:
                 st.error(msg_sorteo)
 
