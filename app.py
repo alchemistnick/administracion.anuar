@@ -675,6 +675,11 @@ with tab_pagos:
     if not pagos:
         st.info("No hay pagos registrados en el sistema para este modelo.")
     else:
+        # BOTÓN DE DESCARGA PARA GESTIÓN DE PAGOS
+        df_pagos_export = pd.DataFrame(pagos).astype(str)
+        descargar_csv_para_excel(df_pagos_export, f"reporte_pagos_{id_modelo_actual}")
+        st.markdown("---")
+
         delegaciones_lista = obtener_delegaciones_por_modelo(id_modelo_actual)
         mapa_colegios = {d.get("id_delegacion"): d.get("nombre_colegio", "Colegio sin nombre") for d in delegaciones_lista}
         mapa_emails = {d.get("id_delegacion"): d.get("docente_email", "") for d in delegaciones_lista}
