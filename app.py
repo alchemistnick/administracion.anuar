@@ -404,6 +404,11 @@ if "admin_logueado" not in st.session_state:
 
 if not st.session_state["admin_logueado"]:
     st.markdown("### 🔒 Acceso Restringido al Secretariado")
+    with st.expander("ℹ️ Instrucciones de Acceso a Secretaría", expanded=True):
+        st.markdown("""
+        - Ingrese la contraseña de administración configurada en los secretos de la aplicación.
+        - Este panel es exclusivo para los miembros del secretariado y administradores generales del Modelo ONU.
+        """)
     with st.form("form_login_admin"):
         pass_ingresada = st.text_input("Contraseña de Administración:", type="password")
         if st.form_submit_button("Ingresar al Panel"):
@@ -452,6 +457,14 @@ st.sidebar.markdown("---")
 
 with tab_dash:
     st.subheader(f"📊 Panel General y Recaudación — {modelo_seleccionado}")
+    
+    with st.expander("ℹ️ Instrucciones de esta sección (Dashboard y KPIs)", expanded=True):
+        st.markdown("""
+        - **Métricas Generales:** Visualice de un vistazo el total de escuelas registradas, cuántas tienen la documentación completa/aprobada, el total de participantes cargados en las nóminas y los pagos pendientes de revisión.
+        - **Resumen Financiero:** Control de la recaudación esperada (según los montos asignados a cada institución), el dinero efectivamente cobrado (pagos aprobados) y el monto pendiente de confirmación.
+        - **Listado General:** Tabla completa con los datos de todas las instituciones preinscriptas, con opción de descarga en formato compatible con Excel.
+        """)
+
     delegaciones = obtener_delegaciones_por_modelo(id_modelo_actual)
     nominas = obtener_nominas_por_modelo(id_modelo_actual)
     pagos = obtener_todos_pagos(id_modelo_actual)
@@ -496,6 +509,16 @@ with tab_dash:
 
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría y Ficha Nominal — {modelo_seleccionado}")
+    
+    with st.expander("ℹ️ Instrucciones de esta sección (Auditoría y Gestión por Escuela)", expanded=True):
+        st.markdown("""
+        - Busque y seleccione una institución mediante el buscador o el menú desplegable.
+        - **Historial del Trámite:** Revise paso a paso si la escuela completó su registro, presupuesto, comprobante y legajo final.
+        - **Asignación de Presupuesto:** Indique el monto que debe abonar la institución y guarde los cambios para notificar automáticamente al docente por correo.
+        - **Aprobación o Rechazo:** Apruebe el legajo completo o envíelo como observado detallando el motivo de las correcciones requeridas.
+        - **Nómina y Documentación:** Revise los datos de los estudiantes, fichas médicas y autorizaciones con enlaces directos para su descarga o visualización.
+        """)
+
     delegaciones_ficha = obtener_delegaciones_por_modelo(id_modelo_actual)
 
     if not delegaciones_ficha:
@@ -680,6 +703,14 @@ with tab_auditoria:
 
 with tab_pagos:
     st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
+    
+    with st.expander("ℹ️ Instrucciones de esta sección (Gestión de Pagos)", expanded=True):
+        st.markdown("""
+        - **Auditoría de Comprobantes:** Revise los pagos subidos por las instituciones, verifique el monto y abra el enlace del comprobante adjunto.
+        - **Actualización de Estado:** Cambie el estado del pago a `APROBADO` o `RECHAZADO` (especificando motivo si se rechaza).
+        - **Limpieza Automática:** Al aprobar un pago nuevo, los comprobantes rechazados anteriores de la misma institución se eliminan automáticamente para mantener ordenado el sistema.
+        """)
+
     pagos = obtener_todos_pagos(id_modelo_actual)
 
     if not pagos:
@@ -760,6 +791,13 @@ with tab_pagos:
 
 with tab_medicos:
     st.subheader(f"🩺 Reporte de Salud — {modelo_seleccionado}")
+    
+    with st.expander("ℹ️ Instrucciones de esta sección (Alertas Médicas)", expanded=True):
+        st.markdown("""
+        - Este módulo filtra automáticamente a todos los participantes que tengan cargada alguna alergia, condición o restricción médica relevante.
+        - Utilice la tabla generada para coordinar la asistencia sanitaria y exporte los datos en formato compatible con Excel para el equipo médico.
+        """)
+
     nominas_medicas = obtener_nominas_por_modelo(id_modelo_actual)
     if nominas_medicas:
         alerta_nominas = [n for n in nominas_medicas if n.get("alergias_medicas") and str(n.get("alergias_medicas")).strip().lower() not in ["ninguna", "-", ""]]
@@ -774,6 +812,13 @@ with tab_medicos:
 
 with tab_acred:
     st.subheader(f"🎫 Acreditaciones Google Forms — {modelo_seleccionado}")
+    
+    with st.expander("ℹ️ Instrucciones de esta sección (Control de Acreditación)", expanded=True):
+        st.markdown("""
+        - Cargue el archivo de respuestas exportado de Google Forms (en formato **CSV** o **Excel**).
+        - El sistema buscará la columna **DNI**, validará los documentos contra la nómina oficial del modelo y marcará automáticamente a los estudiantes acreditados, arrojando el porcentaje de asistencia de la edición.
+        """)
+
     file_forms = st.file_uploader("Cargar respuestas de Google Forms", type=["xlsx", "csv"])
     if file_forms:
         df_f = pd.read_csv(file_forms) if file_forms.name.endswith(".csv") else pd.read_excel(file_forms)
@@ -783,6 +828,14 @@ with tab_acred:
 
 with tab_reportes:
     st.subheader(f"📈 Módulo de Reportes Avanzados y Exportación — {modelo_seleccionado}")
+    
+    with st.expander("ℹ️ Instrucciones de esta sección (Reportes Avanzados)", expanded=True):
+        st.markdown("""
+        - Seleccione del menú desplegable el reporte logístico o institucional que necesite.
+        - Podrá auditar escuelas sin pagos aprobados, nóminas incompletas, personas con o sin país asignado, y países del catálogo que aún no hayan salido sorteados.
+        - Todos los reportes cuentan con un botón para su descarga inmediata en Excel.
+        """)
+
     st.markdown("Selecciona el reporte institucional o logístico que deseas descargar en formato compatible con Excel.")
 
     tipo_reporte = st.selectbox(
@@ -883,6 +936,13 @@ with tab_config:
 
     with subtab_comites:
         st.markdown("### 🏛️ Estructura de Órganos y Comités")
+        
+        with st.expander("ℹ️ Instrucciones de esta sección (Parámetros de Comités)", expanded=True):
+            st.markdown("""
+            - Configure los órganos y comités del modelo, indicando las secciones, integrantes por banca, límites máximos de delegaciones y reglas de exclusión mutua entre secciones.
+            - Guarde los cambios antes de pasar al catálogo de países.
+            """)
+
         comites_actuales = obtener_parametros_comites(id_modelo_actual)
         
         df_comites = pd.DataFrame(comites_actuales) if comites_actuales else pd.DataFrame(columns=["clave_seccion", "organo_comite", "integrantes_por_banca", "requiere_marca", "max_delegaciones_seccion", "excluye_secciones"])
@@ -899,6 +959,13 @@ with tab_config:
 
     with subtab_catalogo:
         st.markdown("### 🌍 Catálogo de Países y Asignación de Órganos")
+        
+        with st.expander("ℹ️ Instrucciones de esta sección (Catálogo de Países)", expanded=True):
+            st.markdown("""
+            - Ingrese la lista de países (un país por línea) en el cuadro de texto.
+            - Utilice los selectores múltiples para configurar en qué órganos o comités puede participar cada país de forma específica antes de realizar el sorteo.
+            """)
+
         comites_modelo = obtener_parametros_comites(id_modelo_actual)
         lista_nombres_comites = sorted(list({str(c.get("organo_comite")).strip() for c in comites_modelo if c.get("organo_comite") and str(c.get("organo_comite")).strip()}))
 
@@ -916,13 +983,11 @@ with tab_config:
                 st.markdown("#### 🔘 Asignación de Órganos por País")
                 mapa_pais_organos = {}
 
-                # Mapeo previo para mantener selecciones guardadas si ya existían
                 mapa_existente_orgs = {c.get("pais"): c.get("organos_permitidos", lista_nombres_comites) for c in catalogo_existente if isinstance(c, dict)}
 
                 for p_idx, pais in enumerate(lista_paises_procesados):
                     key_multi = f"multiselect_{id_modelo_actual}_{p_idx}_{pais}".replace(" ", "_")
                     defaults_previos = mapa_existente_orgs.get(pais, lista_nombres_comites)
-                    # Validar que los defaults existan en los comités actuales
                     defaults_validos = [o for o in defaults_previos if o in lista_nombres_comites]
                     if not defaults_validos:
                         defaults_validos = lista_nombres_comites
@@ -939,6 +1004,14 @@ with tab_config:
 
     with subtab_sorteo:
         st.markdown("### 🎲 Generador y Sorteo de Asignaciones")
+        
+        with st.expander("ℹ️ Instrucciones de esta sección (Sorteo Automático)", expanded=True):
+            st.markdown("""
+            - Asegúrese de haber configurado previamente los comités y cargado el catálogo de países con sus respectivos órganos permitidos.
+            - Al presionar **'Confirmar y Ejecutar Sorteo'**, el sistema asignará de forma automática y equitativa los países a las instituciones según sus solicitudes y cupos registrados.
+            - Puede revisar el resultado global del sorteo en la tabla inferior y descargar el reporte completo.
+            """)
+
         if st.button("🚀 CONFIRMAR Y EJECUTAR SORTEO DE PAÍSES"):
             ok_sorteo, msg_sorteo = ejecutar_sorteo_automatico(id_modelo_actual)
             if ok_sorteo:
@@ -961,6 +1034,12 @@ with tab_config:
 
     with subtab_formulario:
         st.markdown("### 📋 Diseñador de Campos Adicionales y Condicionales")
+        
+        with st.expander("ℹ️ Instrucciones de esta sección (Campos del Formulario)", expanded=True):
+            st.markdown("""
+            - Diseñe campos personalizados adicionales que desee solicitar a las instituciones en los formularios de inscripción de este modelo.
+            """)
+
         campos_actuales = obtener_esquema_formulario(id_modelo_actual)
         df_campos = pd.DataFrame(campos_actuales) if campos_actuales else pd.DataFrame(columns=["nombre_campo", "tipo_dato", "opciones_separadas_por_coma", "es_requerido"])
 
