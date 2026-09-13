@@ -484,9 +484,6 @@ with tab_dash:
         st.info("No hay delegaciones registradas para este modelo.")
 
 
-# =========================================================================
-# MÓDULO UNIFICADO: AUDITORÍA Y FICHA NOMINAL CON LINKS CORREGIDOS
-# =========================================================================
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría y Ficha Nominal — {modelo_seleccionado}")
     delegaciones_ficha = obtener_delegaciones_por_modelo(id_modelo_actual)
@@ -669,7 +666,7 @@ with tab_auditoria:
                                 st.warning("⚠️ Sin Autorización cargada o enlace no válido.")
             else:
                 st.info("No hay integrantes cargados en esta institución.")
-# =========================================================================
+
 
 with tab_pagos:
     st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
@@ -728,6 +725,15 @@ with tab_pagos:
 
                         if st.button("💾 Actualizar Pago", key=f"btn_pago_{id_pago}"):
                             if actualizar_estado_pago(id_pago, nuevo_est, motivo=motivo_pago):
+                                
+                                # ELIMINAR RECHAZADOS ANTERIORES AL APROBAR UN NUEVO PAGO
+                                if nuevo_est == "APROBADO":
+                                    pagos_previos = obtener_pagos_por_delegacion(id_del)
+                                    for pago_prev in pagos_previos:
+                                        pago_prev_id = pago_prev.get("id_pago")
+                                        if pago_prev_id != id_pago and str(pago_prev.get("estado_pago")).upper() == "RECHAZADO":
+                                            eliminar_pago(pago_prev_id)
+
                                 notificar_accion_script("CAMBIAR_ESTADO_PAGO", {
                                     "id_pago": id_pago,
                                     "nuevo_estado": nuevo_est,
@@ -735,7 +741,7 @@ with tab_pagos:
                                     "email_docente": email_doc,
                                     "motivo": motivo_pago
                                 })
-                                st.success("Estado de pago actualizado y notificado.")
+                                st.success("Estado de pago actualizado y notificado. Los comprobantes rechazados antiguos fueron borrados.")
                                 st.rerun()
                 st.markdown("---")
 
@@ -776,7 +782,6 @@ with tab_config:
         st.markdown("### 🏛️ Estructura de Órganos y Comités")
         comites_actuales = obtener_parametros_comites(id_modelo_actual)
         
-        # Agregamos la columna 'excluye_secciones' para soportar reglas de exclusión/bloqueo
         df_comites = pd.DataFrame(comites_actuales) if comites_actuales else pd.DataFrame(columns=["clave_seccion", "organo_comite", "integrantes_por_banca", "requiere_marca", "max_delegaciones_seccion", "excluye_secciones"])
         if "excluye_secciones" not in df_comites.columns:
             df_comites["excluye_secciones"] = ""
