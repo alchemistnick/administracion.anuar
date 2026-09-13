@@ -130,13 +130,17 @@ def obtener_asignaciones_por_modelo(id_modelo):
     try:
         asignaciones = []
         delegaciones = obtener_delegaciones_por_modelo(id_modelo)
+        mapa_colegios = {d.get("id"): d.get("nombre_colegio", "Colegio Desconocido") for d in delegaciones}
+        
         for d in delegaciones:
             id_del = d.get("id")
+            nombre_institucion = mapa_colegios.get(id_del, "Colegio Desconocido")
             docs = db.collection("delegaciones").document(str(id_del)).collection("asignaciones").stream()
             for doc in docs:
                 a = doc.to_dict()
                 a["id_asignacion"] = doc.id
                 a["id_delegacion"] = id_del
+                a["nombre_colegio"] = nombre_institucion
                 asignaciones.append(a)
         return asignaciones
     except Exception as e:
@@ -901,7 +905,10 @@ with tab_config:
         if not lista_nombres_comites:
             st.warning("⚠️ Primero debe configurar y guardar la estructura en la solapa '🏛️ Parámetros de Comités'.")
         else:
-            paises_raw = st.text_area("Pegue la lista de países (un país por línea):", placeholder="Argentina\nBrasil\nFrancia", height=120)
+            catalogo_existente = obtener_catalogo_paises(id_modelo_actual)
+            paises_actuales_str = "\n".join([c.get("pais", "") for c in catalogo_existente if isinstance(c, dict)])
+            
+            paises_raw = st.text_area("Lista de países (un país por línea):", value=paises_actuales_str, placeholder="Argentina\nBrasil\nFrancia", height=120)
             lista_paises_procesados = list(dict.fromkeys([p.strip() for p in paises_raw.split("\n") if p.strip()]))
 
             if lista_paises_procesados:
@@ -909,9 +916,18 @@ with tab_config:
                 st.markdown("#### 🔘 Asignación de Órganos por País")
                 mapa_pais_organos = {}
 
+                # Mapeo previo para mantener selecciones guardadas si ya existían
+                mapa_existente_orgs = {c.get("pais"): c.get("organos_permitidos", lista_nombres_comites) for c in catalogo_existente if isinstance(c, dict)}
+
                 for p_idx, pais in enumerate(lista_paises_procesados):
                     key_multi = f"multiselect_{id_modelo_actual}_{p_idx}_{pais}".replace(" ", "_")
-                    organos_seleccionados = st.multiselect(f"📍 **{pais}** — Órganos en los que participa:", options=lista_nombres_comites, default=lista_nombres_comites, key=key_multi)
+                    defaults_previos = mapa_existente_orgs.get(pais, lista_nombres_comites)
+                    # Validar que los defaults existan en los comités actuales
+                    defaults_validos = [o for o in defaults_previos if o in lista_nombres_comites]
+                    if not defaults_validos:
+                        defaults_validos = lista_nombres_comites
+
+                    organos_seleccionados = st.multiselect(f"📍 **{pais}** — Órganos en los que participa:", options=lista_nombres_comites, default=defaults_validos, key=key_multi)
                     mapa_pais_organos[pais] = organos_seleccionados
 
                 st.markdown("---")
@@ -936,8 +952,8 @@ with tab_config:
         st.markdown("### 📊 Auditoría General de Asignaciones (Resultado del Sorteo)")
         asignaciones_totales = obtener_asignaciones_por_modelo(id_modelo_actual)
         if asignaciones_totales:
-            df_asig_global = pd.DataFrame(asignaciones_totales)[["id_modelo", "seccion", "delegacion_nro", "organo", "pais"]].astype(str)
-            df_asig_global.columns = ["ID Modelo", "Sección", "N° Delegación", "Órgano / Comité", "País Asignado"]
+            df_asig_global = pd.DataFrame(asignaciones_totales)[["id_modelo", "nombre_colegio", "seccion", "delegacion_nro", "organo", "pais"]].astype(str)
+            df_asig_global.columns = ["ID Modelo", "Institución / Colegio", "Sección", "N° Delegación", "Órgano / Comité", "País Asignado"]
             st.dataframe(df_asig_global, use_container_width=True)
             descargar_csv_para_excel(df_asig_global, f"asignaciones_globales_{id_modelo_actual}")
         else:
