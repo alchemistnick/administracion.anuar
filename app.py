@@ -128,12 +128,16 @@ def obtener_delegaciones_por_modelo(id_modelo=None):
 
 def obtener_asignaciones_por_modelo(id_modelo):
     try:
-        docs = db.collection_group("asignaciones").where("id_modelo", "==", str(id_modelo)).stream()
         asignaciones = []
-        for doc in docs:
-            a = doc.to_dict()
-            a["id_asignacion"] = doc.id
-            asignaciones.append(a)
+        delegaciones = obtener_delegaciones_por_modelo(id_modelo)
+        for d in delegaciones:
+            id_del = d.get("id")
+            docs = db.collection("delegaciones").document(str(id_del)).collection("asignaciones").stream()
+            for doc in docs:
+                a = doc.to_dict()
+                a["id_asignacion"] = doc.id
+                a["id_delegacion"] = id_del
+                asignaciones.append(a)
         return asignaciones
     except Exception as e:
         return []
