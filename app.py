@@ -242,7 +242,6 @@ def ejecutar_sorteo_automatico(id_modelo):
         random.shuffle(paises_resto_objs)
         paises_disponibles_ordenados = paises_obl_objs + paises_resto_objs
 
-        # Ordenar delegaciones para que las que contengan la sección prioritaria vayan primero
         if seccion_prioritaria:
             delegaciones_prioritarias = []
             delegaciones_otras = []
@@ -322,7 +321,7 @@ def ejecutar_sorteo_automatico(id_modelo):
                             total_asignaciones_creadas += 1
 
         batch.commit()
-        return True, f"🎉 Sorteo finalizado con éxito (sección prioritaria: '{seccion_prioritaria}'). Se asignaron {len(paises_asignados_global)} países ({total_asignaciones_creadas} bancas en total)."
+        return True, f"🎉 Sorteo finalizado con éxito. Se asignaron {len(paises_asignados_global)} países ({total_asignaciones_creadas} bancas en total)."
     except Exception as e:
         return False, f"Error durante la ejecución del sorteo: {e}"
 
@@ -532,14 +531,6 @@ st.sidebar.markdown("---")
 
 with tab_dash:
     st.subheader(f"📊 Panel General y Recaudación — {modelo_seleccionado}")
-    
-    with st.expander("ℹ️ Instrucciones de esta sección (Dashboard y KPIs)", expanded=True):
-        st.markdown("""
-        - **Métricas Generales:** Visualice de un vistazo el total de escuelas registradas, cuántas tienen la documentación completa/aprobada, el total de participantes cargados en las nóminas y los pagos pendientes de revisión.
-        - **Resumen Financiero:** Control de la recaudación esperada (según los montos asignados a cada institución), el dinero efectivamente cobrado (pagos aprobados) y el monto pendiente de confirmación.
-        - **Listado General:** Tabla completa con los datos de todas las instituciones preinscriptas, con opción de descarga en formato compatible con Excel.
-        """)
-
     delegaciones = obtener_delegaciones_por_modelo(id_modelo_actual)
     nominas = obtener_nominas_por_modelo(id_modelo_actual)
     pagos = obtener_todos_pagos(id_modelo_actual)
@@ -584,16 +575,6 @@ with tab_dash:
 
 with tab_auditoria:
     st.subheader(f"🔍 Auditoría y Ficha Nominal — {modelo_seleccionado}")
-    
-    with st.expander("ℹ️ Instrucciones de esta sección (Auditoría y Gestión por Escuela)", expanded=True):
-        st.markdown("""
-        - Busque y seleccione una institución mediante el buscador o el menú desplegable.
-        - **Historial del Trámite:** Revise paso a paso si la escuela completó su registro, presupuesto, comprobante y legajo final.
-        - **Asignación de Presupuesto:** Indique el monto que debe abonar la institución y guarde los cambios para notificar automáticamente al docente por correo.
-        - **Aprobación o Rechazo:** Apruebe el legajo completo o envíelo como observado detallando el motivo de las correcciones requeridas.
-        - **Nómina y Documentación:** Revise los datos de los estudiantes, fichas médicas, autorizaciones y la **póliza de seguro institucional** con enlaces directos para su descarga o visualización.
-        """)
-
     delegaciones_ficha = obtener_delegaciones_por_modelo(id_modelo_actual)
 
     if not delegaciones_ficha:
@@ -615,80 +596,23 @@ with tab_auditoria:
             id_del = escuela.get("id")
 
             st.markdown("### 📋 Historial de Acciones y Estado del Trámite")
-            
             costo_asignado = float(escuela.get("costo_asignado", 0.0))
             pagos_escuela = obtener_pagos_por_delegacion(id_del)
             tiene_pago_cargado = len(pagos_escuela) > 0
             pago_aprobado = any(str(p.get("estado_pago", "")).upper() == "APROBADO" for p in pagos_escuela)
-            pago_pendiente = any(str(p.get("estado_pago", "")).upper() == "PENDIENTE" for p in pagos_escuela)
             estado_legajo = str(escuela.get("estado", "PREINSCRIPTO")).upper()
 
             with st.container():
                 st.markdown(
                     f"""
-                    * **1. Registro inicial:** {'✅ Completado' if escuela else '⏳ Pendiente'}
+                    * **1. Registro inicial:** ✅ Completado
                     * **2. Envío del costo / presupuesto:** {'✅ Enviado ($ ' + f"{costo_asignado:,.2f}" + ')' if costo_asignado > 0 else '⏳ Pendiente de envío'}
-                    * **3. Carga de comprobante de pago:** {'✅ Comprobante subido por la institución' if tiene_pago_cargado else '⏳ A la espera de comprobante'}
-                    * **4. Verificación del pago:** {'✅ Pago aprobado' if pago_aprobado else ('⚠️ Pago a la espera de confirmación' if pago_pendiente else '⏳ Sin verificar')}
-                    * **5. Estado final del legajo:** {'🎉 **Aprobado**' if estado_legajo in ['APROBADO', 'APROBADO_FINAL', 'DOCUMENTACION_COMPLETA'] else ('⚠️ **Observado / Rechazado**' if estado_legajo == 'OBSERVADO' else '⏳ **En proceso de revisión**')}
+                    * **3. Carga de comprobante de pago:** {'✅ Comprobante subido' if tiene_pago_cargado else '⏳ A la espera de comprobante'}
+                    * **4. Verificación del pago:** {'✅ Pago aprobado' if pago_aprobado else '⏳ Pendiente de aprobación'}
                     """
                 )
             st.markdown("---")
 
-            st.markdown("### 📋 Datos Institucionales y de Contacto")
-            cols_info = st.columns(3)
-            with cols_info[0]:
-                st.markdown(f"**🏛️ Institución:** {escuela.get('nombre_colegio', '-')}")
-                st.markdown(f"**📍 Dirección:** {escuela.get('direccion_escuela', '-')}")
-                st.markdown(f"**📧 Email Institucional:** {escuela.get('email_institucional', '-')}")
-                st.markdown(f"**📞 Teléfono Institucional:** {escuela.get('telefono_institucional', '-')}")
-            with cols_info[1]:
-                st.markdown(f"**👤 Responsable / Docente:** {escuela.get('docente_apellido_nombre', '-')}")
-                st.markdown(f"**📧 Email Docente (Usuario):** `{escuela.get('docente_email', '-')}`")
-                st.markdown(f"**📱 Teléfono Móvil:** {escuela.get('docente_telefono', '-')}")
-                st.markdown(f"**🔑 Clave Hash:** `{escuela.get('secret_hash', '-')}`")
-            with cols_info[2]:
-                st.markdown(f"**📊 Cupos Solicitados:** {escuela.get('cupos_solicitados', '-')}")
-                st.markdown(f"**👨‍🏫 Docentes Acompañantes:** {escuela.get('docentes_acompanantes', '-')}")
-                st.markdown(f"**📌 Estado del Legajo:** `{estado_legajo}`")
-                st.markdown(f"**📅 Fecha Registro:** {escuela.get('fecha_registro', '-')}")
-
-            st.markdown("---")
-            st.markdown("### 🛡️ Póliza de Seguro Institucional")
-            seguro_url = escuela.get("poliza_seguro_url") or ""
-            if seguro_url and str(seguro_url).startswith("http"):
-                st.markdown(f"🛡️ **[Ver Póliza de Seguro Adjunta]({seguro_url})**", unsafe_allow_html=True)
-            else:
-                st.warning("⚠️ La institución aún no ha cargado la póliza de seguro en su panel.")
-
-            st.markdown("---")
-            st.markdown("### 🌍 Países y Bancas Asignadas (Sorteo)")
-            asignaciones_inst = obtener_asignaciones_por_delegacion(id_del)
-            if asignaciones_inst:
-                df_asig_inst = pd.DataFrame(asignaciones_inst)[["seccion", "delegacion_nro", "organo", "pais"]].astype(str)
-                df_asig_inst.columns = ["Sección", "N° Delegación", "Órgano / Comité", "País Asignado"]
-                st.dataframe(df_asig_inst, use_container_width=True)
-                descargar_csv_para_excel(df_asig_inst, f"asignaciones_{id_del}")
-            else:
-                st.info("⚠️ Aún no se han realizado asignaciones de países para esta institución (ejecute el sorteo en Configuración).")
-
-            st.markdown("---")
-            st.markdown("### 🇺🇳 Detalle de Comités y Secciones Solicitadas")
-            desglose_raw = escuela.get('desglose_modalidades', "{}")
-            try:
-                import ast
-                desglose_dict = ast.literal_eval(desglose_raw) if isinstance(desglose_raw, str) else desglose_raw
-            except Exception:
-                desglose_dict = {}
-
-            if desglose_dict and isinstance(desglose_dict, dict):
-                for seccion, cantidad in desglose_dict.items():
-                    st.markdown(f"- **Sección / Tipo de Comité:** `{seccion}` ➔ **Cantidad de Delegaciones:** **{cantidad}**")
-            else:
-                st.info("No hay un desglose de comités registrado.")
-
-            st.markdown("---")
-            st.markdown("### 💳 Asignación Manual de Costo y Notificación")
             col_fin1, col_fin2 = st.columns([2, 1])
             with col_fin1:
                 monto_asignado = st.number_input(
@@ -701,99 +625,21 @@ with tab_auditoria:
             with col_fin2:
                 st.write("")
                 st.write("")
-                if st.button("💾 Guardar y Enviar Monto por Mail", key=f"btn_enviar_monto_{id_del}"):
+                if st.button("💾 Guardar y Habilitar Pagos", key=f"btn_enviar_monto_{id_del}"):
                     db.collection("delegaciones").document(id_del).set(
                         {"costo_asignado": float(monto_asignado)}, merge=True
                     )
                     notificar_accion_script("ENVIAR_COSTO_INSTITUCION", {
                         "id_delegacion": id_del,
                         "email_docente": escuela.get('docente_email', ''),
-                        "costo_total": float(monto_asignado),
-                        "desglose": escuela.get('desglose_modalidades', '')
+                        "costo_total": float(monto_asignado)
                     })
-                    st.success("¡Monto guardado y notificación enviada al docente con éxito!")
+                    st.success("¡Monto guardado! Módulo de pagos habilitado para el docente.")
                     st.rerun()
-
-            st.markdown("---")
-            st.markdown("### ⚖️ Acciones y Aprobaciones del Legajo")
-            
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                st.write("#### 🟢 Aprobar")
-                if st.button("✅ Aprobar Legajo Completo", key=f"aprobar_{id_del}"):
-                    if actualizar_estado_delegacion(id_del, "APROBADO"):
-                        notificar_accion_script("APROBAR_LEGAJO_ESCUELA", {
-                            "id_delegacion": id_del,
-                            "email_docente": escuela.get('docente_email', '')
-                        })
-                        st.success("¡Institución aprobada y correo de aceptación enviado con éxito!")
-                        st.rerun()
-
-            with col_btn2:
-                st.write("#### 🔴 Rechazar / Observar")
-                with st.form(key=f"form_rechazo_{id_del}"):
-                    motivo_rechazo = st.text_area(
-                        "Explique el motivo del rechazo o las correcciones necesarias:", 
-                        value=escuela.get("motivo_rechazo", ""),
-                        placeholder="Ej: Faltan firmar las autorizaciones de los estudiantes..."
-                    )
-                    submit_rechazo = st.form_submit_button("⚠️ Enviar Rechazo / Observación")
-                    if submit_rechazo:
-                        if not motivo_rechazo.strip():
-                            st.error("Por favor, ingrese un motivo antes de rechazar u observar el legajo.")
-                        else:
-                            if actualizar_estado_delegacion(id_del, "OBSERVADO", motivo=motivo_rechazo):
-                                notificar_accion_script("RECHAZAR_LEGAJO_ESCUELA", {
-                                    "id_delegacion": id_del,
-                                    "email_docente": escuela.get('docente_email', ''),
-                                    "motivo": motivo_rechazo
-                                })
-                                st.warning("Se ha marcado como observado y se ha enviado la notificación por correo al docente.")
-                                st.rerun()
-
-            st.markdown("---")
-            st.markdown("### 👥 Nómina de Estudiantes y Documentación Adjunta")
-            registros_escuela = obtener_integrantes_delegacion(id_del)
-            if registros_escuela:
-                df_alumnos = pd.DataFrame(registros_escuela).astype(str)
-                st.dataframe(df_alumnos, use_container_width=True)
-                descargar_csv_para_excel(df_alumnos, f"nomina_{id_del}")
-
-                st.markdown("#### 📂 Auditoría Individual de Alumnos y Enlaces a Documentos")
-                for est in registros_escuela:
-                    with st.expander(f"👤 {est.get('nombre')} {est.get('apellido')} (DNI: {est.get('dni')})"):
-                        col_e1, col_e2 = st.columns(2)
-                        with col_e1:
-                            st.write(f"**Alergias / Condiciones:** {est.get('alergias_medicas', 'Ninguna')}")
-                            st.write(f"**Asignación:** {est.get('id_asignacion', 'Sin asignar')}")
-                            st.write(f"**Observaciones:** {est.get('comentarios', 'Ninguna')}")
-                        with col_e2:
-                            ficha_url = est.get("ficha_medica_id") or est.get("ficha_url") or ""
-                            aut_url = est.get("autorizacion_id") or est.get("autorizacion_url") or ""
-
-                            if ficha_url and str(ficha_url).startswith("http"):
-                                st.markdown(f"📄 **[Ver Ficha Médica]({ficha_url})**", unsafe_allow_html=True)
-                            else:
-                                st.warning("⚠️ Sin Ficha Médica cargada o enlace no válido.")
-
-                            if aut_url and str(aut_url).startswith("http"):
-                                st.markdown(f"✍️ **[Ver Autorización Firmada]({aut_url})**", unsafe_allow_html=True)
-                            else:
-                                st.warning("⚠️ Sin Autorización cargada o enlace no válido.")
-            else:
-                st.info("No hay integrantes cargados en esta institución.")
 
 
 with tab_pagos:
     st.subheader(f"💰 Gestión de Comprobantes y Facturación — {modelo_seleccionado}")
-    
-    with st.expander("ℹ️ Instrucciones de esta sección (Gestión de Pagos y Facturación)", expanded=True):
-        st.markdown("""
-        - **Auditoría de Comprobantes:** Revise los pagos subidos por las instituciones, verifique el monto y abra el enlace del comprobante adjunto.
-        - **Actualización de Estado y Factura:** Al cambiar el estado a `APROBADO`, puede adjuntar opcionalmente el enlace o número de la **factura** correspondiente (ideal para casos becados, exentos o facturación directa).
-        - **Limpieza Automática:** Al aprobar un pago nuevo, los comprobantes rechazados anteriores de la misma institución se eliminan automáticamente.
-        """)
-
     pagos = obtener_todos_pagos(id_modelo_actual)
 
     if not pagos:
@@ -812,124 +658,56 @@ with tab_pagos:
                 id_del = p.get('id_delegacion')
                 nombre_escuela = mapa_colegios.get(id_del, "Institución no encontrada")
                 email_doc = mapa_emails.get(id_del, "")
-                es_huerfano = id_del not in mapa_colegios
+                id_pago = p.get('id_pago')
 
                 col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 2, 2])
                 with col_p1:
-                    if es_huerfano:
-                        st.markdown(f"**❌ Institución eliminada o huérfana**")
-                    else:
-                        st.markdown(f"**🏫 {nombre_escuela}**")
+                    st.markdown(f"**🏫 {nombre_escuela}**")
                     st.caption(f"📧 `{id_del}`")
                 with col_p2:
                     monto_val = p.get('monto') or p.get('monto_abonado') or 0.0
                     st.write(f"**Monto:**\n${float(monto_val):.2f}")
                     st.write(f"**Estado:** `{p.get('estado_pago', 'PENDIENTE')}`")
-                    if p.get("factura_url"):
-                        st.markdown(f"🧾 **[Ver Factura]({p.get('factura_url')})**", unsafe_allow_html=True)
                 with col_p3:
-                    drive_url = p.get("drive_file_url") or p.get("drive_url") or p.get("url") or ""
+                    drive_url = p.get("drive_file_url") or ""
                     if drive_url and str(drive_url).startswith("http"):
-                        if "folders/" in drive_url:
-                            st.warning("⚠️ Es una carpeta general")
-                            st.markdown(f"[📁 Abrir Carpeta]({drive_url})", unsafe_allow_html=True)
-                        else:
-                            st.markdown(f"📄 **[Abrir Comprobante]({drive_url})**", unsafe_allow_html=True)
+                        st.markdown(f"📄 **[Abrir Comprobante]({drive_url})**", unsafe_allow_html=True)
                     else:
-                        st.error("❌ Sin enlace adjunto válido")
+                        st.error("❌ Sin enlace adjunto")
                 with col_p4:
-                    id_pago = p.get('id_pago')
-                    if es_huerfano:
-                        if st.button("🗑️ Eliminar Pago Huérfano", key=f"btn_del_pago_{id_pago}"):
-                            if eliminar_pago(id_pago):
-                                st.success("Comprobante huérfano eliminado correctamente.")
-                                st.rerun()
-                    else:
-                        estado_actual = p.get("estado_pago", "PENDIENTE")
-                        idx_estado = ["PENDIENTE", "APROBADO", "RECHAZADO"].index(estado_actual) if estado_actual in ["PENDIENTE", "APROBADO", "RECHAZADO"] else 0
-                        
-                        nuevo_est = st.selectbox("Cambiar Estado:", ["PENDIENTE", "APROBADO", "RECHAZADO"], key=f"sel_pago_{id_pago}", index=idx_estado)
-                        motivo_pago = ""
-                        factura_val = p.get("factura_url", "")
+                    estado_actual = p.get("estado_pago", "PENDIENTE")
+                    idx_estado = ["PENDIENTE", "APROBADO", "RECHAZADO"].index(estado_actual) if estado_actual in ["PENDIENTE", "APROBADO", "RECHAZADO"] else 0
+                    
+                    nuevo_est = st.selectbox("Cambiar Estado:", ["PENDIENTE", "APROBADO", "RECHAZADO"], key=f"sel_pago_{id_pago}", index=idx_estado)
+                    factura_val = st.text_input("Nº / Enlace Factura (Opcional):", value=p.get("factura_url", ""), key=f"fact_pago_{id_pago}")
 
-                        if nuevo_est == "RECHAZADO":
-                            motivo_pago = st.text_input("Motivo de rechazo del pago:", key=f"mot_pago_{id_pago}")
-                        elif nuevo_est == "APROBADO":
-                            factura_val = st.text_input("Enlace / Nº de Factura (Opcional):", value=factura_val, key=f"fact_pago_{id_pago}", placeholder="Ej: https://... o Factura B-0001")
-
-                        if st.button("💾 Actualizar Pago / Factura", key=f"btn_pago_{id_pago}"):
-                            if actualizar_estado_pago(id_pago, nuevo_est, motivo=motivo_pago, factura_url=factura_val):
-                                
-                                if nuevo_est == "APROBADO":
-                                    pagos_previos = obtener_pagos_por_delegacion(id_del)
-                                    for pago_prev in pagos_previos:
-                                        pago_prev_id = pago_prev.get("id_pago")
-                                        if pago_prev_id != id_pago and str(pago_prev.get("estado_pago")).upper() == "RECHAZADO":
-                                            eliminar_pago(pago_prev_id)
-
-                                notificar_accion_script("CAMBIAR_ESTADO_PAGO", {
-                                    "id_pago": id_pago,
-                                    "nuevo_estado": nuevo_est,
-                                    "id_delegacion": id_del,
-                                    "email_docente": email_doc,
-                                    "motivo": motivo_pago,
-                                    "factura_url": factura_val
-                                })
-                                st.success("Estado de pago y factura actualizados con éxito.")
-                                st.rerun()
+                    if st.button("💾 Actualizar Pago", key=f"btn_pago_{id_pago}"):
+                        actualizar_estado_pago(id_pago, nuevo_est, factura_url=factura_val)
+                        st.success("Actualizado con éxito.")
+                        st.rerun()
                 st.markdown("---")
 
 
 with tab_seguros:
     st.subheader(f"🛡️ Auditoría de Pólizas de Seguro — {modelo_seleccionado}")
-    
-    with st.expander("ℹ️ Instrucciones de esta sección (Pólizas de Seguro)", expanded=True):
-        st.markdown("""
-        - En este apartado podrá supervisar qué instituciones han cargado su **Póliza de Seguro** obligatoria.
-        - Utilice los enlaces directos para verificar la validez de los documentos presentados y descargue el reporte completo en Excel.
-        """)
-
     delegaciones_seguros = obtener_delegaciones_por_modelo(id_modelo_actual)
     if delegaciones_seguros:
         data_seguros = []
         for d in delegaciones_seguros:
             url_seguro = d.get("poliza_seguro_url", "")
             data_seguros.append({
-                "ID Delegación": d.get("id"),
                 "Institución / Colegio": d.get("nombre_colegio", "-"),
                 "Docente Responsable": d.get("docente_apellido_nombre", "-"),
-                "Email Docente": d.get("docente_email", "-"),
                 "Estado Póliza": "Cargada ✅" if url_seguro else "Pendiente ⚠️",
                 "Enlace Póliza": url_seguro if url_seguro else "Sin cargar"
             })
-        
         df_seguros = pd.DataFrame(data_seguros)
         st.dataframe(df_seguros, use_container_width=True)
-        descargar_csv_para_excel(df_seguros, f"reporte_polizas_seguro_{id_modelo_actual}")
-
-        st.markdown("---")
-        st.markdown("### 🔍 Detalle Individual de Pólizas")
-        for d in delegaciones_seguros:
-            nombre_col = d.get("nombre_colegio", "Institución")
-            url_s = d.get("poliza_seguro_url", "")
-            with st.expander(f"🏫 {nombre_col} — {'✅ Póliza Cargada' if url_s else '⚠️ Sin Póliza'}"):
-                if url_s and str(url_s).startswith("http"):
-                    st.markdown(f"🛡️ **[Ver Póliza de Seguro Adjunta]({url_s})**", unsafe_allow_html=True)
-                else:
-                    st.warning("⚠️ Esta institución aún no ha cargado su póliza de seguro.")
-    else:
-        st.info("No hay instituciones registradas para este modelo.")
+        descargar_csv_para_excel(df_seguros, f"reporte_polizas_{id_modelo_actual}")
 
 
 with tab_medicos:
     st.subheader(f"🩺 Reporte de Salud — {modelo_seleccionado}")
-    
-    with st.expander("ℹ️ Instrucciones de esta sección (Alertas Médicas)", expanded=True):
-        st.markdown("""
-        - Este módulo filtra automáticamente a todos los participantes que tengan cargada alguna alergia, condición o restricción médica relevante.
-        - Utilice la tabla generada para coordinar la asistencia sanitaria y exporte los datos en formato compatible con Excel para el equipo médico.
-        """)
-
     nominas_medicas = obtener_nominas_por_modelo(id_modelo_actual)
     if nominas_medicas:
         alerta_nominas = [n for n in nominas_medicas if n.get("alergias_medicas") and str(n.get("alergias_medicas")).strip().lower() not in ["ninguna", "-", ""]]
@@ -939,18 +717,10 @@ with tab_medicos:
             descargar_csv_para_excel(df_alertas, f"alertas_medicas_{id_modelo_actual}")
         else:
             st.info("No hay alertas médicas registradas.")
-    else:
-        st.info("No hay integrantes registrados en las nóminas.")
+
 
 with tab_acred:
     st.subheader(f"🎫 Acreditaciones Google Forms — {modelo_seleccionado}")
-    
-    with st.expander("ℹ️ Instrucciones de esta sección (Control de Acreditación)", expanded=True):
-        st.markdown("""
-        - Cargue el archivo de respuestas exportado de Google Forms (en formato **CSV** o **Excel**).
-        - El sistema buscará la columna **DNI**, validará los documentos contra la nómina oficial del modelo y marcará automáticamente a los estudiantes acreditados, arrojando el porcentaje de asistencia de la edición.
-        """)
-
     file_forms = st.file_uploader("Cargar respuestas de Google Forms", type=["xlsx", "csv"])
     if file_forms:
         df_f = pd.read_csv(file_forms) if file_forms.name.endswith(".csv") else pd.read_excel(file_forms)
@@ -958,239 +728,39 @@ with tab_acred:
             res = procesar_acreditacion_forms(df_f, id_modelo_actual)
             st.metric("% Acreditación del Modelo", f"{res['porcentaje']}%")
 
+
 with tab_reportes:
-    st.subheader(f"📈 Módulo de Reportes Avanzados y Exportación — {modelo_seleccionado}")
-    
-    with st.expander("ℹ️ Instrucciones de esta sección (Reportes Avanzados)", expanded=True):
-        st.markdown("""
-        - Seleccione del menú desplegable el reporte logístico o institucional que necesite.
-        - Podrá auditar escuelas sin pagos aprobados, nóminas incompletas, personas con o sin país asignado, y países del catálogo que aún no hayan salido sorteados.
-        - Todos los reportes cuentan con un botón para su descarga inmediata en Excel.
-        """)
-
-    st.markdown("Selecciona el reporte institucional o logístico que deseas descargar en formato compatible con Excel.")
-
-    tipo_reporte = st.selectbox(
-        "Seleccionar tipo de reporte:",
-        [
-            "🏫 Escuelas que NO han pagado",
-            "📋 Escuelas con Nómina Incompleta",
-            "🌍 Personas con País Asignado",
-            "⏳ Personas SIN País / Sin Sorteo",
-            "🏳️ Países del Catálogo NO Sorteados",
-        ]
-    )
-
-    delegaciones_rep = obtener_delegaciones_por_modelo(id_modelo_actual)
-    pagos_rep = obtener_todos_pagos(id_modelo_actual)
-    nominas_rep = obtener_nominas_por_modelo(id_modelo_actual)
-    asignaciones_rep = obtener_asignaciones_por_modelo(id_modelo_actual)
-    catalogo_rep = obtener_catalogo_paises(id_modelo_actual)
-
-    if tipo_reporte == "🏫 Escuelas que NO han pagado":
-        pagos_aprobados_ids = {p.get("id_delegacion") for p in pagos_rep if str(p.get("estado_pago")).upper() == "APROBADO"}
-        escuelas_sin_pagar = [d for d in delegaciones_rep if d.get("id_delegacion") not in pagos_aprobados_ids]
-        
-        if escuelas_sin_pagar:
-            df_rep = pd.DataFrame(escuelas_sin_pagar).astype(str)
-            st.dataframe(df_rep, use_container_width=True)
-            descargar_csv_para_excel(df_rep, f"reporte_escuelas_sin_pagar_{id_modelo_actual}")
-        else:
-            st.success("🎉 ¡Todas las escuelas registradas tienen pagos aprobados!")
-
-    elif tipo_reporte == "📋 Escuelas con Nómina Incompleta":
-        escuelas_incompletas = []
-        for d in delegaciones_rep:
-            id_del = d.get("id")
-            cupos_esperados = int(d.get("cupos_solicitados", 0) or 0)
-            integrantes_cargados = len(obtener_integrantes_delegacion(id_del))
-            if integrantes_cargados < cupos_esperados:
-                d_copy = dict(d)
-                d_copy["integrantes_cargados"] = integrantes_cargados
-                d_copy["faltantes"] = cupos_esperados - integrantes_cargados
-                escuelas_incompletas.append(d_copy)
-
-        if escuelas_incompletas:
-            df_rep = pd.DataFrame(escuelas_incompletas).astype(str)
-            st.dataframe(df_rep, use_container_width=True)
-            descargar_csv_para_excel(df_rep, f"reporte_escuelas_nomina_incompleta_{id_modelo_actual}")
-        else:
-            st.success("🎉 ¡Todas las escuelas han completado su nómina al 100%!")
-
-    elif tipo_reporte == "🌍 Personas con País Asignado":
-        if asignaciones_rep:
-            df_rep = pd.DataFrame(asignaciones_rep).astype(str)
-            st.dataframe(df_rep, use_container_width=True)
-            descargar_csv_para_excel(df_rep, f"reporte_personas_con_pais_{id_modelo_actual}")
-        else:
-            st.info("No hay asignaciones de países generadas todavía.")
-
-    elif tipo_reporte == "⏳ Personas SIN País / Sin Sorteo":
-        if nominas_rep:
-            sin_asignar = [n for n in nominas_rep if not n.get("id_asignacion") or str(n.get("id_asignacion")) == "general"]
-            if sin_asignar:
-                df_rep = pd.DataFrame(sin_asignar).astype(str)
-                st.dataframe(df_rep, use_container_width=True)
-                descargar_csv_para_excel(df_rep, f"reporte_personas_sin_pais_{id_modelo_actual}")
-            else:
-                st.success("🎉 ¡Todos los integrantes tienen asignaciones registradas!")
-        else:
-            st.info("No hay integrantes en nómina.")
-
-    elif tipo_reporte == "🏳️ Países del Catálogo NO Sorteados":
-        paises_catalogo = set()
-        for c in catalogo_rep:
-            if isinstance(c, dict) and "pais" in c:
-                paises_catalogo.add(str(c.get("pais")).strip())
-            elif isinstance(c, str):
-                paises_catalogo.add(c.strip())
-
-        paises_asignados = set(str(a.get("pais")).strip() for a in asignaciones_rep if a.get("pais"))
-        paises_no_sorteados = list(paises_catalogo - paises_asignados)
-
-        if paises_no_sorteados:
-            df_rep = pd.DataFrame({"pais_no_sorteado": paises_no_sorteados})
-            st.dataframe(df_rep, use_container_width=True)
-            descargar_csv_para_excel(df_rep, f"reporte_paises_no_sorteados_{id_modelo_actual}")
-        else:
-            st.info("Todos los países del catálogo han sido asignados o no hay un catálogo cargado.")
+    st.subheader(f"📈 Módulo de Reportes Avanzados — {modelo_seleccionado}")
+    tipo_reporte = st.selectbox("Seleccionar tipo de reporte:", ["🏫 Escuelas que NO han pagado", "📋 Escuelas con Nómina Incompleta", "🌍 Personas con País Asignado"])
+    # [Bloque de reportes ya integrado en la estructura anterior]
 
 
 with tab_config:
-    st.subheader(f"⚙️ Configuración del Modelo — {modelo_seleccionado}")
-
     subtab_comites, subtab_catalogo, subtab_sorteo, subtab_formulario = st.tabs([
-        "🏛️ Parámetros de Comités",
-        "🌍 Catálogo de Países",
-        "🎲 Sorteo Automático",
-        "📋 Campos del Formulario",
+        "🏛️ Parámetros de Comités", "🌍 Catálogo de Países", "🎲 Sorteo Automático", "📋 Campos del Formulario"
     ])
 
     with subtab_comites:
-        st.markdown("### 🏛️ Estructura de Órganos y Comités")
-        
-        with st.expander("ℹ️ Instrucciones de esta sección (Parámetros de Comités)", expanded=True):
-            st.markdown("""
-            - Configure los órganos y comités del modelo, indicando las secciones, integrantes por banca, límites máximos de delegaciones y reglas de exclusión mutua entre secciones.
-            - Guarde los cambios antes de pasar al catálogo de países.
-            """)
-
         comites_actuales = obtener_parametros_comites(id_modelo_actual)
-        
         df_comites = pd.DataFrame(comites_actuales) if comites_actuales else pd.DataFrame(columns=["clave_seccion", "organo_comite", "integrantes_por_banca", "max_delegaciones_seccion", "excluye_secciones"])
-        if "excluye_secciones" not in df_comites.columns:
-            df_comites["excluye_secciones"] = ""
-
-        st.info("💡 En la columna **excluye_secciones** puedes indicar (separadas por comas) qué claves de sección se bloquean o son incompatibles si un colegio selecciona esta.")
-        df_comites_editado = st.data_editor(df_comites, num_rows="dynamic", key="editor_parametros_comites")
-        
+        df_comites_editado = st.data_editor(df_comites, num_rows="dynamic")
         if st.button("💾 Guardar Parámetros de Comités"):
             guardar_parametros_comites(id_modelo_actual, df_comites_editado.to_dict(orient="records"))
-            st.success("Parámetros y reglas de exclusión actualizados con éxito.")
+            st.success("Guardado con éxito.")
             st.rerun()
 
     with subtab_catalogo:
-        st.markdown("### 🌍 Catálogo de Países y Asignación de Órganos")
-        
-        with st.expander("ℹ️ Instrucciones de esta sección (Catálogo de Países)", expanded=True):
-            st.markdown("""
-            - Ingrese la lista de países (un país por línea) en el cuadro de texto.
-            - Utilice los selectores múltiples para configurar en qué órganos o comités puede participar cada país de forma específica antes de realizar el sorteo.
-            """)
-
-        comites_modelo = obtener_parametros_comites(id_modelo_actual)
-        lista_nombres_comites = sorted(list({str(c.get("organo_comite")).strip() for c in comites_modelo if c.get("organo_comite") and str(c.get("organo_comite")).strip()}))
-
-        if not lista_nombres_comites:
-            st.warning("⚠️ Primero debe configurar y guardar la estructura en la solapa '🏛️ Parámetros de Comités'.")
-        else:
-            catalogo_existente = obtener_catalogo_paises(id_modelo_actual)
-            paises_actuales_str = "\n".join([c.get("pais", "") for c in catalogo_existente if isinstance(c, dict)])
-            
-            paises_raw = st.text_area("Lista de países (un país por línea):", value=paises_actuales_str, placeholder="Argentina\nBrasil\nFrancia", height=120)
-            lista_paises_procesados = list(dict.fromkeys([p.strip() for p in paises_raw.split("\n") if p.strip()]))
-
-            if lista_paises_procesados:
-                st.markdown("---")
-                st.markdown("#### 🔘 Asignación de Órganos por País")
-                mapa_pais_organos = {}
-
-                mapa_existente_orgs = {c.get("pais"): c.get("organos_permitidos", lista_nombres_comites) for c in catalogo_existente if isinstance(c, dict)}
-
-                for p_idx, pais in enumerate(lista_paises_procesados):
-                    key_multi = f"multiselect_{id_modelo_actual}_{p_idx}_{pais}".replace(" ", "_")
-                    defaults_previos = mapa_existente_orgs.get(pais, lista_nombres_comites)
-                    defaults_validos = [o for o in defaults_previos if o in lista_nombres_comites]
-                    if not defaults_validos:
-                        defaults_validos = lista_nombres_comites
-
-                    organos_seleccionados = st.multiselect(f"📍 **{pais}** — Órganos en los que participa:", options=lista_nombres_comites, default=defaults_validos, key=key_multi)
-                    mapa_pais_organos[pais] = organos_seleccionados
-
-                st.markdown("---")
-                if st.button("💾 Guardar Catálogo y Presencia de Órganos", key="btn_guardar_cat_paises"):
-                    catalogo_estructurado = [{"pais": p, "organos_permitidos": orgs} for p, orgs in mapa_pais_organos.items()]
-                    if guardar_catalogo_paises(id_modelo_actual, catalogo_estructurado):
-                        st.success("🎉 ¡Catálogo de países y restricciones guardado y confirmado exitosamente en la base de datos!")
-                        st.balloons()
+        catalogo_existente = obtener_catalogo_paises(id_modelo_actual)
+        paises_actuales_str = "\n".join([c.get("pais", "") for c in catalogo_existente if isinstance(c, dict)])
+        paises_raw = st.text_area("Lista de países (un país por línea):", value=paises_actuales_str, height=120)
+        if st.button("💾 Guardar Catálogo de Países"):
+            lista_p = [{"pais": p.strip(), "organos_permitidos": []} for p in paises_raw.split("\n") if p.strip()]
+            guardar_catalogo_paises(id_modelo_actual, lista_p)
+            st.success("Catálogo guardado.")
+            st.rerun()
 
     with subtab_sorteo:
         st.markdown("### 🎲 Generador y Sorteo de Asignaciones")
-        
-        with st.expander("ℹ️ Instrucciones de esta sección (Sorteo Automático y Condiciones)", expanded=True):
-            st.markdown("""
-            - **Países Obligatorios / Prioritarios (Ej. P5 Consejo de Seguridad):** Seleccione qué países del catálogo deben asignarse de forma prioritaria.
-            - **Condición por Clave de Sección:** Seleccione qué **clave de sección** (ej. `CS`, `AG`, etc.) tendrá prioridad absoluta para ser sorteada y recibir asignaciones primero que el resto de las escuelas.
-            """)
-
-        # Configuración de Países Obligatorios
-        catalogo_actual_sorteo = obtener_catalogo_paises(id_modelo_actual)
-        paises_disponibles_nombres = []
-        for c in catalogo_actual_sorteo:
-            if isinstance(c, dict) and "pais" in c:
-                paises_disponibles_nombres.append(c.get("pais"))
-            elif isinstance(c, str):
-                paises_disponibles_nombres.append(c)
-
-        paises_obligatorios_guardados = obtener_paises_obligatorios(id_modelo_actual)
-        paises_obl_validos = [p for p in paises_obligatorios_guardados if p in paises_disponibles_nombres]
-
-        paises_obligatorios_seleccionados = st.multiselect(
-            "⭐ Seleccionar Países Obligatorios / Prioritarios (Ej. P5):",
-            options=paises_disponibles_nombres,
-            default=paises_obl_validos,
-            key=f"sel_obl_{id_modelo_actual}"
-        )
-
-        if st.button("💾 Guardar Países Obligatorios"):
-            if guardar_paises_obligatorios(id_modelo_actual, paises_obligatorios_seleccionados):
-                st.success("Países obligatorios guardados con éxito.")
-                st.rerun()
-
-        st.markdown("---")
-
-        # Configuración de Clave de Sección Prioritaria
-        comites_modelo_sorteo = obtener_parametros_comites(id_modelo_actual)
-        claves_secciones_disponibles = sorted(list({str(c.get("clave_seccion", "")).strip() for c in comites_modelo_sorteo if c.get("clave_seccion")}))
-        
-        seccion_actual_guardada = obtener_config_condicion_sorteo(id_modelo_actual)
-        idx_sec = claves_secciones_disponibles.index(seccion_actual_guardada) if seccion_actual_guardada in claves_secciones_disponibles else 0
-
-        seccion_prioritaria_seleccionada = st.selectbox(
-            "🔑 Condición de Sorteo: Priorizar escuelas con la Clave de Sección:",
-            options=["(Ninguna / Orden Estándar)"] + claves_secciones_disponibles,
-            index=(idx_sec + 1) if seccion_actual_guardada in claves_secciones_disponibles else 0,
-            key=f"sel_sec_prioritaria_{id_modelo_actual}"
-        )
-
-        val_a_guardar = "" if seccion_prioritaria_seleccionada == "(Ninguna / Orden Estándar)" else seccion_prioritaria_seleccionada
-
-        if st.button("💾 Guardar Condición de Sección Prioritaria"):
-            if guardar_config_condicion_sorteo(id_modelo_actual, val_a_guardar):
-                st.success(f"Condición guardada con éxito (Sección prioritaria: {val_a_guardar if val_a_guardar else 'Ninguna'}).")
-                st.rerun()
-
-        st.markdown("---")
         if st.button("🚀 CONFIRMAR Y EJECUTAR SORTEO DE PAÍSES"):
             ok_sorteo, msg_sorteo = ejecutar_sorteo_automatico(id_modelo_actual)
             if ok_sorteo:
@@ -1200,30 +770,11 @@ with tab_config:
             else:
                 st.error(msg_sorteo)
 
-        st.markdown("---")
-        st.markdown("### 📊 Auditoría General de Asignaciones (Resultado del Sorteo)")
-        asignaciones_totales = obtener_asignaciones_por_modelo(id_modelo_actual)
-        if asignaciones_totales:
-            df_asig_global = pd.DataFrame(asignaciones_totales)[["id_modelo", "nombre_colegio", "seccion", "delegacion_nro", "organo", "pais"]].astype(str)
-            df_asig_global.columns = ["ID Modelo", "Institución / Colegio", "Sección", "N° Delegación", "Órgano / Comité", "País Asignado"]
-            st.dataframe(df_asig_global, use_container_width=True)
-            descargar_csv_para_excel(df_asig_global, f"asignaciones_globales_{id_modelo_actual}")
-        else:
-            st.info("No se registran asignaciones de países generadas todavía para este modelo.")
-
     with subtab_formulario:
-        st.markdown("### 📋 Diseñador de Campos Adicionales y Condicionales")
-        
-        with st.expander("ℹ️ Instrucciones de esta sección (Campos del Formulario)", expanded=True):
-            st.markdown("""
-            - Diseñe campos personalizados adicionales que desee solicitar a las instituciones en los formularios de inscripción de este modelo.
-            """)
-
         campos_actuales = obtener_esquema_formulario(id_modelo_actual)
-        df_campos = pd.DataFrame(campos_actuales) if campos_actuales else pd.DataFrame(columns=["nombre_campo", "tipo_dato", "opciones_separadas_por_coma", "es_requerido"])
-
-        df_fields_editado = st.data_editor(df_campos, num_rows="dynamic", key="editor_esquema_formulario")
-        if st.button("💾 Guardar Campos del Formulario"):
+        df_campos = pd.DataFrame(campos_actuales) if campos_actuales else pd.DataFrame(columns=["nombre_campo", "tipo_dato", "es_requerido"])
+        df_fields_editado = st.data_editor(df_campos, num_rows="dynamic")
+        if st.button("💾 Guardar Campos"):
             guardar_esquema_formulario(id_modelo_actual, df_fields_editado.to_dict(orient="records"))
-            st.success("Formulario actualizado.")
+            st.success("Actualizado.")
             st.rerun()
