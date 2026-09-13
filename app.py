@@ -106,6 +106,27 @@ def guardar_catalogo_paises(id_modelo, lista_paises_estructurada):
         return False
 
 
+def obtener_paises_obligatorios(id_modelo):
+    try:
+        doc = db.collection("configuracion").document(str(id_modelo)).get()
+        if doc.exists:
+            return doc.to_dict().get("paises_obligatorios", [])
+        return []
+    except Exception as e:
+        return []
+
+
+def guardar_paises_obligatorios(id_modelo, lista_paises):
+    try:
+        db.collection("configuracion").document(str(id_modelo)).set(
+            {"paises_obligatorios": lista_paises}, merge=True
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar países obligatorios: {e}")
+        return False
+
+
 def obtener_delegaciones_por_modelo(id_modelo=None):
     try:
         ref = db.collection("delegaciones")
@@ -174,6 +195,8 @@ def ejecutar_sorteo_automatico(id_modelo):
         if not delegaciones:
             return False, "No hay instituciones registradas para sortear."
 
+        paises_obligatorios = obtener_paises_obligatorios(id_modelo)
+
         secciones_map = {}
         for c in comites_reglas:
             sec = str(c.get("clave_seccion", "GENERAL")).strip()
@@ -191,7 +214,13 @@ def ejecutar_sorteo_automatico(id_modelo):
                     "organos_permitidos": [str(c.get("organo_comite")).strip() for c in comites_reglas],
                 })
 
-        random.shuffle(paises_disponibles)
+        # Separar países obligatorios (ej. P5 del Consejo de Seguridad)
+        paises_obl_objs = [p for p in paises_disponibles if p.get("pais") in paises_obligatorios]
+        paises_resto_objs = [p for p in paises_disponibles if p.get("pais") not in paises_obligatorios]
+        
+        random.shuffle(paises_resto_objs)
+        paises_disponibles_ordenados = paises_obl_objs + paises_resto_objs
+
         batch = db.batch()
         total_asignaciones_creadas = 0
         paises_asignados_global = set()
@@ -215,7 +244,7 @@ def ejecutar_sorteo_automatico(id_modelo):
                 for i in range(int(cantidad_del)):
                     del_index += 1
                     pais_elegido = None
-                    for candidate in paises_disponibles:
+                    for candidate in paises_disponibles_ordenados:
                         nombre_p = candidate.get("pais")
                         permitidos = candidate.get("organos_permitidos", [])
 
@@ -226,7 +255,7 @@ def ejecutar_sorteo_automatico(id_modelo):
                                 break
 
                     if not pais_elegido:
-                        for candidate in paises_disponibles:
+                        for candidate in paises_disponibles_ordenados:
                             nombre_p = candidate.get("pais")
                             if nombre_p not in paises_asignados_global:
                                 pais_elegido = nombre_p
@@ -251,7 +280,7 @@ def ejecutar_sorteo_automatico(id_modelo):
                             total_asignaciones_creadas += 1
 
         batch.commit()
-        return True, f"🎉 Sorteo finalizado con éxito. Se asignaron {len(paises_asignados_global)} países ({total_asignaciones_creadas} bancas en total)."
+        return True, f"🎉 Sorteo finalizado con éxito (priorizando obligatorios). Se asignaron {len(paises_asignados_global)} países ({total_asignaciones_creadas} bancas en total)."
     except Exception as e:
         return False, f"Error durante la ejecución del sorteo: {e}"
 
@@ -329,11 +358,13 @@ def obtener_pagos_por_delegacion(id_delegacion):
         return []
 
 
-def actualizar_estado_pago(id_pago, nuevo_estado, motivo=""):
+def actualizar_estado_pago(id_pago, nuevo_estado, motivo="", factura_url=""):
     try:
         payload = {"estado_pago": nuevo_estado}
         if motivo:
             payload["motivo_rechazo_pago"] = motivo
+        if factura_url:
+            payload["factura_url"] = factura_url
         db.collection("pagos").document(str(id_pago)).set(payload, merge=True)
         return True
     except Exception as e:
@@ -516,7 +547,7 @@ with tab_auditoria:
         - **Historial del Trámite:** Revise paso a paso si la escuela completó su registro, presupuesto, comprobante y legajo final.
         - **Asignación de Presupuesto:** Indique el monto que debe abonar la institución y guarde los cambios para notificar automáticamente al docente por correo.
         - **Aprobación o Rechazo:** Apruebe el legajo completo o envíelo como observado detallando el motivo de las correcciones requeridas.
-        - **Nómina y Documentación:** Revise los datos de los estudiantes, fichas médicas y autorizaciones con enlaces directos para su descarga o visualización.
+        - **Nómina y Documentación:** Revise los datos de los estudiantes, fichas médicas, autorizaciones y ahora también las **pólizas de seguro** con enlaces directos para su descarga o visualización.
         """)
 
     delegaciones_ficha = obtener_delegaciones_por_modelo(id_modelo_actual)
@@ -577,6 +608,14 @@ with tab_auditoria:
                 st.markdown(f"**👨‍🏫 Docentes Acompañantes:** {escuela.get('docentes_acompanantes', '-')}")
                 st.markdown(f"**📌 Estado del Legajo:** `{estado_legajo}`")
                 st.markdown(f"**📅 Fecha Registro:** {escuela.get('fecha_registro', '-')}")
+
+            st.markdown("---")
+            st.markdown("### 🛡️ Póliza de Seguro Institucional")
+            seguro_url = escuela.get("poliza_seguro_url") or ""
+            if seguro_url and str(seguro_url).startswith("http"):
+                st.markdown(f"🛡️ **[Ver Póliza de Seguro Adjunta]({seguro_url})**", unsafe_allow_html=True)
+            else:
+                st.warning("⚠️ La institución aún no ha cargado la póliza de seguro correspondiente en su panel docente.")
 
             st.markdown("---")
             st.markdown("### 🌍 Países y Bancas Asignadas (Sorteo)")
@@ -702,13 +741,13 @@ with tab_auditoria:
 
 
 with tab_pagos:
-    st.subheader(f"💰 Gestión de Comprobantes — {modelo_seleccionado}")
+    st.subheader(f"💰 Gestión de Comprobantes y Facturación — {modelo_seleccionado}")
     
-    with st.expander("ℹ️ Instrucciones de esta sección (Gestión de Pagos)", expanded=True):
+    with st.expander("ℹ️ Instrucciones de esta sección (Gestión de Pagos y Facturación)", expanded=True):
         st.markdown("""
         - **Auditoría de Comprobantes:** Revise los pagos subidos por las instituciones, verifique el monto y abra el enlace del comprobante adjunto.
-        - **Actualización de Estado:** Cambie el estado del pago a `APROBADO` o `RECHAZADO` (especificando motivo si se rechaza).
-        - **Limpieza Automática:** Al aprobar un pago nuevo, los comprobantes rechazados anteriores de la misma institución se eliminan automáticamente para mantener ordenado el sistema.
+        - **Actualización de Estado y Factura:** Al cambiar el estado a `APROBADO`, puede adjuntar opcionalmente el enlace o número de la **factura** correspondiente (ideal para casos becados, exentos o facturación directa).
+        - **Limpieza Automática:** Al aprobar un pago nuevo, los comprobantes rechazados anteriores de la misma institución se eliminan automáticamente.
         """)
 
     pagos = obtener_todos_pagos(id_modelo_actual)
@@ -742,6 +781,8 @@ with tab_pagos:
                     monto_val = p.get('monto') or p.get('monto_abonado') or 0.0
                     st.write(f"**Monto:**\n${float(monto_val):.2f}")
                     st.write(f"**Estado:** `{p.get('estado_pago', 'PENDIENTE')}`")
+                    if p.get("factura_url"):
+                        st.markdown(f"🧾 **[Ver Factura]({p.get('factura_url')})**", unsafe_allow_html=True)
                 with col_p3:
                     drive_url = p.get("drive_file_url") or p.get("drive_url") or p.get("url") or ""
                     if drive_url and str(drive_url).startswith("http"):
@@ -765,11 +806,15 @@ with tab_pagos:
                         
                         nuevo_est = st.selectbox("Cambiar Estado:", ["PENDIENTE", "APROBADO", "RECHAZADO"], key=f"sel_pago_{id_pago}", index=idx_estado)
                         motivo_pago = ""
+                        factura_val = p.get("factura_url", "")
+
                         if nuevo_est == "RECHAZADO":
                             motivo_pago = st.text_input("Motivo de rechazo del pago:", key=f"mot_pago_{id_pago}")
+                        elif nuevo_est == "APROBADO":
+                            factura_val = st.text_input("Enlace / Nº de Factura (Opcional):", value=factura_val, key=f"fact_pago_{id_pago}", placeholder="Ej: https://... o Factura B-0001")
 
-                        if st.button("💾 Actualizar Pago", key=f"btn_pago_{id_pago}"):
-                            if actualizar_estado_pago(id_pago, nuevo_est, motivo=motivo_pago):
+                        if st.button("💾 Actualizar Pago / Factura", key=f"btn_pago_{id_pago}"):
+                            if actualizar_estado_pago(id_pago, nuevo_est, motivo=motivo_pago, factura_url=factura_val):
                                 
                                 if nuevo_est == "APROBADO":
                                     pagos_previos = obtener_pagos_por_delegacion(id_del)
@@ -783,9 +828,10 @@ with tab_pagos:
                                     "nuevo_estado": nuevo_est,
                                     "id_delegacion": id_del,
                                     "email_docente": email_doc,
-                                    "motivo": motivo_pago
+                                    "motivo": motivo_pago,
+                                    "factura_url": factura_val
                                 })
-                                st.success("Estado de pago actualizado y notificado. Los comprobantes rechazados antiguos fueron borrados.")
+                                st.success("Estado de pago y factura actualizados con éxito.")
                                 st.rerun()
                 st.markdown("---")
 
@@ -1005,13 +1051,36 @@ with tab_config:
     with subtab_sorteo:
         st.markdown("### 🎲 Generador y Sorteo de Asignaciones")
         
-        with st.expander("ℹ️ Instrucciones de esta sección (Sorteo Automático)", expanded=True):
+        with st.expander("ℹ️ Instrucciones de esta sección (Sorteo Automático y Países Obligatorios)", expanded=True):
             st.markdown("""
-            - Asegúrese de haber configurado previamente los comités y cargado el catálogo de países con sus respectivos órganos permitidos.
-            - Al presionar **'Confirmar y Ejecutar Sorteo'**, el sistema asignará de forma automática y equitativa los países a las instituciones según sus solicitudes y cupos registrados.
-            - Puede revisar el resultado global del sorteo en la tabla inferior y descargar el reporte completo.
+            - **Países Obligatorios / Prioritarios (Ej. P5 Consejo de Seguridad):** Seleccione qué países del catálogo deben asignarse obligatoriamente o de forma prioritaria antes de iniciar el sorteo masivo general.
+            - **Ejecución:** Al presionar **'Confirmar y Ejecutar Sorteo'**, el sistema procesará primero los obligatorios y luego completará el resto de forma equitativa.
             """)
 
+        catalogo_actual_sorteo = obtener_catalogo_paises(id_modelo_actual)
+        paises_disponibles_nombres = []
+        for c in catalogo_actual_sorteo:
+            if isinstance(c, dict) and "pais" in c:
+                paises_disponibles_nombres.append(c.get("pais"))
+            elif isinstance(c, str):
+                paises_disponibles_nombres.append(c)
+
+        paises_obligatorios_guardados = obtener_paises_obligatorios(id_modelo_actual)
+        paises_obl_validos = [p for p in paises_obligatorios_guardados if p in paises_disponibles_nombres]
+
+        paises_obligatorios_seleccionados = st.multiselect(
+            "⭐ Seleccionar Países Obligatorios / Prioritarios a Sortear Sí o Sí (Ej. Consejo de Seguridad P5):",
+            options=paises_disponibles_nombres,
+            default=paises_obl_validos,
+            key=f"sel_obl_{id_modelo_actual}"
+        )
+
+        if st.button("💾 Guardar Países Obligatorios"):
+            if guardar_paises_obligatorios(id_modelo_actual, paises_obligatorios_seleccionados):
+                st.success("Países obligatorios guardados con éxito.")
+                st.rerun()
+
+        st.markdown("---")
         if st.button("🚀 CONFIRMAR Y EJECUTAR SORTEO DE PAÍSES"):
             ok_sorteo, msg_sorteo = ejecutar_sorteo_automatico(id_modelo_actual)
             if ok_sorteo:
