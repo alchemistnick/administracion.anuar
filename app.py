@@ -127,6 +127,27 @@ def guardar_paises_obligatorios(id_modelo, lista_paises):
         return False
 
 
+def obtener_config_condicion_sorteo(id_modelo):
+    try:
+        doc = db.collection("configuracion").document(str(id_modelo)).get()
+        if doc.exists:
+            return doc.to_dict().get("condicion_seccion_prioritaria", "")
+        return ""
+    except Exception as e:
+        return ""
+
+
+def guardar_config_condicion_sorteo(id_modelo, clave_seccion):
+    try:
+        db.collection("configuracion").document(str(id_modelo)).set(
+            {"condicion_seccion_prioritaria": clave_seccion}, merge=True
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar condición de sección: {e}")
+        return False
+
+
 def obtener_delegaciones_por_modelo(id_modelo=None):
     try:
         ref = db.collection("delegaciones")
@@ -196,6 +217,7 @@ def ejecutar_sorteo_automatico(id_modelo):
             return False, "No hay instituciones registradas para sortear."
 
         paises_obligatorios = obtener_paises_obligatorios(id_modelo)
+        seccion_prioritaria = obtener_config_condicion_sorteo(id_modelo)
 
         secciones_map = {}
         for c in comites_reglas:
@@ -220,11 +242,32 @@ def ejecutar_sorteo_automatico(id_modelo):
         random.shuffle(paises_resto_objs)
         paises_disponibles_ordenados = paises_obl_objs + paises_resto_objs
 
+        # Ordenar delegaciones para que las que contengan la sección prioritaria vayan primero
+        if seccion_prioritaria:
+            delegaciones_prioritarias = []
+            delegaciones_otras = []
+            for d in delegaciones:
+                desglose_raw = d.get("desglose_modalidades", "{}")
+                try:
+                    import ast
+                    d_dict = ast.literal_eval(desglose_raw) if isinstance(desglose_raw, str) else desglose_raw
+                except Exception:
+                    d_dict = {}
+                
+                if seccion_prioritaria in d_dict and int(d_dict.get(seccion_prioritaria, 0)) > 0:
+                    delegaciones_prioritarias.append(d)
+                else:
+                    delegaciones_otras.append(d)
+            
+            delegaciones_ordenadas = delegaciones_prioritarias + delegaciones_otras
+        else:
+            delegaciones_ordenadas = delegaciones
+
         batch = db.batch()
         total_asignaciones_creadas = 0
         paises_asignados_global = set()
 
-        for del_doc in delegaciones:
+        for del_doc in delegaciones_ordenadas:
             email_docente = del_doc.get("id_delegacion")
             desglose_raw = del_doc.get("desglose_modalidades", "{}")
             try:
@@ -279,7 +322,7 @@ def ejecutar_sorteo_automatico(id_modelo):
                             total_asignaciones_creadas += 1
 
         batch.commit()
-        return True, f"🎉 Sorteo finalizado con éxito (priorizando obligatorios). Se asignaron {len(paises_asignados_global)} países ({total_asignaciones_creadas} bancas en total)."
+        return True, f"🎉 Sorteo finalizado con éxito (sección prioritaria: '{seccion_prioritaria}'). Se asignaron {len(paises_asignados_global)} países ({total_asignaciones_creadas} bancas en total)."
     except Exception as e:
         return False, f"Error durante la ejecución del sorteo: {e}"
 
@@ -1094,12 +1137,13 @@ with tab_config:
     with subtab_sorteo:
         st.markdown("### 🎲 Generador y Sorteo de Asignaciones")
         
-        with st.expander("ℹ️ Instrucciones de esta sección (Sorteo Automático y Países Obligatorios)", expanded=True):
+        with st.expander("ℹ️ Instrucciones de esta sección (Sorteo Automático y Condiciones)", expanded=True):
             st.markdown("""
-            - **Países Obligatorios / Prioritarios (Ej. P5 Consejo de Seguridad):** Seleccione qué países del catálogo deben asignarse obligatoriamente o de forma prioritaria antes de iniciar el sorteo masivo general.
-            - **Ejecución:** Al presionar **'Confirmar y Ejecutar Sorteo'**, el sistema procesará primero los obligatorios y luego completará el resto de forma equitativa.
+            - **Países Obligatorios / Prioritarios (Ej. P5 Consejo de Seguridad):** Seleccione qué países del catálogo deben asignarse de forma prioritaria.
+            - **Condición por Clave de Sección:** Seleccione qué **clave de sección** (ej. `CS`, `AG`, etc.) tendrá prioridad absoluta para ser sorteada y recibir asignaciones primero que el resto de las escuelas.
             """)
 
+        # Configuración de Países Obligatorios
         catalogo_actual_sorteo = obtener_catalogo_paises(id_modelo_actual)
         paises_disponibles_nombres = []
         for c in catalogo_actual_sorteo:
@@ -1112,7 +1156,7 @@ with tab_config:
         paises_obl_validos = [p for p in paises_obligatorios_guardados if p in paises_disponibles_nombres]
 
         paises_obligatorios_seleccionados = st.multiselect(
-            "⭐ Seleccionar Países Obligatorios / Prioritarios a Sortear Sí o Sí (Ej. Consejo de Seguridad P5):",
+            "⭐ Seleccionar Países Obligatorios / Prioritarios (Ej. P5):",
             options=paises_disponibles_nombres,
             default=paises_obl_validos,
             key=f"sel_obl_{id_modelo_actual}"
@@ -1121,6 +1165,29 @@ with tab_config:
         if st.button("💾 Guardar Países Obligatorios"):
             if guardar_paises_obligatorios(id_modelo_actual, paises_obligatorios_seleccionados):
                 st.success("Países obligatorios guardados con éxito.")
+                st.rerun()
+
+        st.markdown("---")
+
+        # Configuración de Clave de Sección Prioritaria
+        comites_modelo_sorteo = obtener_parametros_comites(id_modelo_actual)
+        claves_secciones_disponibles = sorted(list({str(c.get("clave_seccion", "")).strip() for c in comites_modelo_sorteo if c.get("clave_seccion")}))
+        
+        seccion_actual_guardada = obtener_config_condicion_sorteo(id_modelo_actual)
+        idx_sec = claves_secciones_disponibles.index(seccion_actual_guardada) if seccion_actual_guardada in claves_secciones_disponibles else 0
+
+        seccion_prioritaria_seleccionada = st.selectbox(
+            "🔑 Condición de Sorteo: Priorizar escuelas con la Clave de Sección:",
+            options=["(Ninguna / Orden Estándar)"] + claves_secciones_disponibles,
+            index=(idx_sec + 1) if seccion_actual_guardada in claves_secciones_disponibles else 0,
+            key=f"sel_sec_prioritaria_{id_modelo_actual}"
+        )
+
+        val_a_guardar = "" if seccion_prioritaria_seleccionada == "(Ninguna / Orden Estándar)" else seccion_prioritaria_seleccionada
+
+        if st.button("💾 Guardar Condición de Sección Prioritaria"):
+            if guardar_config_condicion_sorteo(id_modelo_actual, val_a_guardar):
+                st.success(f"Condición guardada con éxito (Sección prioritaria: {val_a_guardar if val_a_guardar else 'Ninguna'}).")
                 st.rerun()
 
         st.markdown("---")
